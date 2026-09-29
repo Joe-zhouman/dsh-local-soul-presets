@@ -1,0 +1,3 @@
+name: 问答模式
+description: 零工具，只把工作区的 SOUL.md 作为 system prompt。
+order: 1.5

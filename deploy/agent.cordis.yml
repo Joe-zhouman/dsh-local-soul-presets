@@ -1,0 +1,15 @@
+# 问答模式（qa）agent 预设的最小可用组合：只挂 soul-prompt 一行。
+#
+# name 必须是 soul-prompt.mjs 的绝对路径——换成你的 $DSH_HOME 下实际位置
+# （Unix 如 /home/you/.dsh/preset-plugins/soul-prompt.mjs，
+#  Windows 用正斜杠如 C:/Users/you/.dsh/preset-plugins/soul-prompt.mjs）。
+# 若你的部署已有 qa 预设，不要覆盖整个文件：只在它的 agent.cordis.yml 的
+# soul-prompt 行的 config 里加 `presets: true`。
+- id: soul-prompt
+  name: '/replace/with/your/DSH_HOME/preset-plugins/soul-prompt.mjs'
+  config:
+    mode: replace
+    presets: true
+    file: SOUL.md
+    defaultPrompt: 'You are a helpful assistant.'
+    maxBytes: 65536

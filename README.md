@@ -11,11 +11,36 @@
 | 部署机工作副本 | `L:\dsh\.local-deploy\soul-presets-plugin\`（即本仓库的检出） |
 | 类型 | host + client bundle（`dsh.client.platform: web`，自带 `dsh.bundle.patch`） |
 | 安装 spec | `file:L:/dsh/.local-deploy/soul-presets-plugin` |
-| 宿主半区入口 | `lib/index.js`（预构建产物，安装后不读 `src/`；`lib/` 不入库，`pnpm run build` 重建） |
-| 浏览器半区入口 | `lib/client.js`（预构建产物） |
+| 宿主半区入口 | `lib/index.js`（预构建产物随仓库提交，安装后不读 `src/`；在 dsh 检出内 `pnpm run build` 重建，改完 `src/` 要把新的 `lib/` 一并提交） |
+| 浏览器半区入口 | `lib/client.js`（预构建产物，随仓库提交） |
 | 配置位置（0.1.7 起） | `L:\dsh\.dsh-home\profiles\web\cordis.patch.yml` 里 `local-soul-presets` 条目的 `config.active`；0.1.6 及更早是 `settings.yaml` 的 `soul-preset` 命名空间 |
 
 它是 dsh 仓库的**仓库外插件**：不改 `packages/` 或其他已跟踪源码，只作为一个 profile bundle 挂到 `web` profile。构建依赖 dsh 检出（tsdown 与 schemastery 取自 `../../`，见 `package.json` 的 scripts 与 devDependencies），因此在本仓库独立检出里直接 `pnpm run build` 不可用——工作副本必须位于 dsh 检出内。功能生效还需要另外两处改动（见文末"生效所需的三处改动"）。
+
+## 在别人的部署上安装
+
+`lib/` 预构建产物随仓库提交、包内无 prepare 脚本，所以从 git 安装不需要本地构建（包没有构建脚本也就不会触发 pnpm 的 allowBuilds 拦截）。前置：一个能跑 `dsh --profile web` 的部署，`DSH_HOME` 存在（默认 `~/.dsh`），机器上有 git。
+
+```sh
+# 1) 安装插件包（二选一，github: 缩写或完整 git URL）
+dsh plugin --profile web add "github:Joe-zhouman/dsh-local-soul-presets"
+dsh plugin --profile web add "git+https://github.com/Joe-zhouman/dsh-local-soul-presets.git"
+
+# 2) 放置部署侧文件（deploy/ 目录里有现成的）
+mkdir -p "$DSH_HOME/preset-plugins" "$DSH_HOME/.agent-presets/qa"
+cp deploy/soul-prompt.mjs                    "$DSH_HOME/preset-plugins/"
+cp deploy/preset.yml deploy/agent.cordis.yml "$DSH_HOME/.agent-presets/qa/"
+#    然后把 agent.cordis.yml 里 soul-prompt 的 name 改成你的绝对路径（文件头有说明）
+
+# 3) 重启 web 服务
+```
+
+装好后在设置页「预设提示词」分区新建／删除预设，或把 `.toml` 直接放进 `$DSH_HOME/soul-presets/`；问答模式 composer 的 chip 切换当前预设，下一轮提问生效，无需重开会话。
+
+注意两条：
+
+- **已有 `qa` 预设的部署不要覆盖**：只在你现有 `agent.cordis.yml` 的 `soul-prompt` 行 `config` 里加 `presets: true`，其余文件不动。
+- `dsh plugin add` 底层是 pnpm；git 安装源要求目标机器能访问 github.com。`soul-prompt.mjs` 同时也在本机服务 `chat` 行（`mode: append` + persona + CHAT.md），把它放进 preset-plugins 不影响没有 chat 行的部署。
 
 ## 预设目录与文件格式
 
