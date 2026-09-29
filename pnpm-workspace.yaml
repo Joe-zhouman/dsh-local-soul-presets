@@ -1,0 +1,11 @@
+# This package's own workspace root.
+#
+# A `pnpm install` run in this directory must never resolve against L:/dsh's
+# workspace: the repository owns a tracked pnpm-lock.yaml and a package glob it
+# did not write for this package. pnpm stops at the nearest
+# pnpm-workspace.yaml, so this file keeps every dev install local to
+# .local-deploy/.
+packages:
+  - .
+
+nodeLinker: hoisted

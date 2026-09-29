@@ -1,0 +1,28 @@
+{
+  "name": "dsh-local-soul-presets",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": { "default": "./lib/index.js" },
+    "./client": { "default": "./lib/client.js" }
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web" }
+  },
+  "dependencies": {
+    "smol-toml": "^1.7.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "link:../../vendor/schemastery"
+  },
+  "scripts": {
+    "build": "node ../../node_modules/tsdown/dist/run.mjs --config tsdown.config.mjs --config-loader native",
+    "test": "node --test test/*.test.mjs"
+  }
+}
