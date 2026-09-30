@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeCtx, withPresetRoot } from './support/fake-host-ctx.mjs'
 import { guardServices } from './support/fake-client-ctx.mjs'
 import { fakeUiPrimitives } from './support/fake-ui-primitives.mjs'
+import { FOLLOW_DEFAULT, SELECT_ROUTE } from '../src/client-state.mjs'
 
 /** The package root: this file lives in its test/ directory. */
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -193,7 +194,7 @@ async function withFetch(run) {
   const calls = []
   const original = globalThis.fetch
   globalThis.fetch = async (url, init = {}) => {
-    calls.push({ url, method: init.method ?? 'GET' })
+    calls.push({ url, method: init.method ?? 'GET', ...init.body === undefined ? {} : { body: JSON.parse(init.body) } })
     return { ok: true, status: 200, json: async () => ROSTER_BODY }
   }
   try {
@@ -249,7 +250,7 @@ test('构建成功，且宿主产物导出插件面', async () => {
   assert.equal(typeof host.resolvePresetRoot, 'function')
 })
 
-test('构建后的宿主入口行为与源码一致：配置、服务与三条路由', async () => {
+test('构建后的宿主入口行为与源码一致：配置、服务与四条路由', async () => {
   assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
   const host = await import(pathToFileURL(join(root, 'lib/index.js')).href)
   assert.equal(host.Config.dict.active.meta.volatile, true)
@@ -258,6 +259,7 @@ test('构建后的宿主入口行为与源码一致：配置、服务与三条�
     host.apply(ctx, config)
     assert.deepEqual(routes.map(route => route.path), [
       '/plugins/soul-preset/roster',
+      '/plugins/soul-preset/select',
       '/plugins/soul-preset/presets',
       '/plugins/soul-preset/reveal',
     ])
@@ -406,6 +408,7 @@ test('失败提示真的会渲染出来：dock 与设置页都显示同一句原
   const { registrations, seat } = loadClient()
   const reason = 'preset "draft" already exists'
   seat.roster.reportFailure(reason)
+  seat.defaults.reportFailure(reason)
   const props = sessionProps(seat, 'qa')
   for (const [index, label] of [[1, 'dock'], [2, '设置页']]) {
     const element = findByProp(registrations[index].component(props), 'data-dsh-soul-preset-error')
@@ -426,7 +429,7 @@ test('读取失败也会渲染出来，动作提示缺席时用读取失败顶�
   assert.deepEqual(element.children, [readFailure])
 })
 
-test('产物交互：chip 把切换列表交给共用菜单，选行会写入选择并刷新列表', async () => {
+test('产物交互：chip 把切换列表交给共用菜单，选行 POST 本会话的 select 并刷新列表', async () => {
   assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
   await withFetch(async calls => {
     const renderer = createRenderer()
@@ -454,9 +457,37 @@ test('产物交互：chip 把切换列表交给共用菜单，选行会写入选
     assert.deepEqual(findByProp(row, 'data-dsh-soul-preset-description').children, ['中英互译'])
     assert.deepEqual(findByProp(row, 'data-dsh-soul-preset-hint').children, ['贴段落'])
     row.props.onClick()
-    assert.deepEqual(writes, [{ field: 'active', value: 'translate' }])
+    assert.deepEqual(writes, [], 'chip 选行写的是这个会话的选择，不再写全局 settings')
+    const select = calls.find(call => call.method === 'POST' && call.url === SELECT_ROUTE)
+    assert.ok(select !== undefined, '选行必须 POST select 路由')
+    assert.deepEqual(select.body, { session: 'current-session', id: 'translate' })
     assert.ok(calls.filter(call => call.method === 'GET').length >= 2, '选择后必须重新读一次列表')
     assert.equal(menuOf(renderer.render(chip, props)).props.open, false, '选定后列表必须关闭')
+  })
+})
+
+test('产物交互：会话带覆盖时菜单顶部出现「跟随默认」，点它发不带 id 的 select', async () => {
+  assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
+  await withFetch(async calls => {
+    const renderer = createRenderer()
+    const { registrations, seat, primitives } = loadClient(renderer.react)
+    await seat.refresh('current-session')
+    const overridden = {
+      ...seat.roster.getSnapshot(),
+      roster: { ...seat.roster.getSnapshot().roster, overridden: true },
+    }
+    const props = { ...sessionProps(seat, 'qa'), roster: { ...seat.roster, getSnapshot: () => overridden } }
+    const chip = registrations[0].component
+    const menuOf = tree => findBy(tree, element => element.type === primitives.Menu)
+    menuOf(renderer.render(chip, props)).props.anchor.props.onClick()
+    const opened = menuOf(renderer.render(chip, props))
+    assert.equal(opened.props.items[0].id, FOLLOW_DEFAULT, '覆盖存在时第一行必须是跟随默认')
+    assert.equal(opened.props.items[1].id, 'translate', '预设行紧随其后')
+    assert.ok(findByProp(expand(opened), 'data-dsh-soul-preset-follow') !== undefined, '跟随默认行有自己的探针')
+    const followRow = findBy(expand(opened), element => element.props['data-item-id'] === FOLLOW_DEFAULT)
+    followRow.props.onClick()
+    const select = calls.find(call => call.method === 'POST' && call.url === SELECT_ROUTE)
+    assert.deepEqual(select.body, { session: 'current-session' }, '重置不带 id')
   })
 })
 
@@ -481,6 +512,7 @@ test('产物交互：删除要先确认，确认后才真的发 DELETE', async (
     const renderer = createRenderer()
     const { registrations, seat } = loadClient(renderer.react)
     await seat.refresh()
+    await seat.defaults.refresh()
     const settings = registrations[2].component
     const props = sessionProps(seat, 'qa')
     const first = renderer.render(settings, props)

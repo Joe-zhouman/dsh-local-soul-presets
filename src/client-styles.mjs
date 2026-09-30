@@ -109,6 +109,12 @@ export const CSS_TEXT = `
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* The 「跟随默认」 row sits above the roster once a session carries its own
+   override. Muted like a caption: it is an action, not a preset to pick. */
+.dsh-sp-row-follow .dsh-sp-row-name {
+  color: var(--dsw-alias-label-tertiary);
+}
+
 /* The switch list scrolls well before the shared card's viewport-fit cap. That
    native limit is near the full screen, so a long roster stands fully open and
    covers the page; this class narrows the card and the primitive's .viewport

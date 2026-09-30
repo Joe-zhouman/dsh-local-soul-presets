@@ -61,12 +61,14 @@ export function apply(ctx, config = {}) {
 
   // Presets are offered only to rows that ask for them. The switch is explicit
   // rather than inferred from `mode`, because the same module serves the chat
-  // row (mode 'append', persona + CHAT.md) and that row must not change.
-  function presetText(cwd) {
+  // row (mode 'append', persona + CHAT.md) and that row must not change. The
+  // selection resolves per session: the session's own override first, then the
+  // deployment's default — the service decides, this row only names the session.
+  function presetText(cwd, sessionId) {
     if (!presets) return undefined
     const service = ctx.get('soulPresets')
     if (service === undefined) return undefined
-    const text = service.promptText(cwd)
+    const text = service.promptText(cwd, sessionId)
     return text === null ? undefined : text
   }
 
@@ -92,7 +94,7 @@ export function apply(ctx, config = {}) {
         cwd = agent.session?.header?.cwd ?? process.cwd()
         cwdByAgent.set(agent, cwd)
       }
-      const fromPreset = presetText(cwd)
+      const fromPreset = presetText(cwd, agent.session?.header?.id)
       if (fromPreset !== undefined) return fromPreset
       if (mode === 'append') {
         let snapshot = snapshotByAgent.get(agent)

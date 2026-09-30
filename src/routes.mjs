@@ -13,6 +13,7 @@ import { unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isTrustedLocalRequest } from './guard.mjs'
 import { PRESET_ID } from './presets.mjs'
+import { SESSION_ID } from './selection.mjs'
 import { presetTemplate } from './template.mjs'
 
 /** Largest request body accepted, in bytes. */
@@ -82,13 +83,56 @@ async function readId(req) {
 }
 
 /**
+ * Read and validate a selection body: `{session, id}` sets one session's
+ * override, `{session}` (or an empty/absent id) clears it back to the default.
+ * @param req - the request.
+ * @returns the session and the preset id (null for the reset), or a status.
+ */
+async function readSelection(req) {
+  const body = await readBody(req)
+  if (body === null) return { status: 413 }
+  let parsed
+  try {
+    parsed = JSON.parse(body === '' ? '{}' : body)
+  } catch {
+    return { status: 400 }
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { status: 400 }
+  const session = parsed.session
+  if (typeof session !== 'string' || !SESSION_ID.test(session)) return { status: 400 }
+  const raw = parsed.id
+  if (raw === undefined || raw === null || raw === '') return { session, id: null }
+  if (typeof raw !== 'string' || !PRESET_ID.test(raw)) return { status: 400 }
+  return { session, id: raw }
+}
+
+/**
+ * The validated `session` query parameter of a request URL, when it carries one.
+ * A GET read stays lenient: absent or malformed simply means the default view.
+ * @param url - the request's URL.
+ * @returns the session id, or null.
+ */
+function sessionParam(url) {
+  if (typeof url !== 'string' || url === '') return null
+  let parsed
+  try {
+    parsed = new URL(url, 'http://localhost')
+  } catch {
+    return null
+  }
+  const value = parsed.searchParams.get('session')
+  return value !== null && SESSION_ID.test(value) ? value : null
+}
+
+/**
  * Build the route table.
- * @param deps - root directory, preset store, active-id reader, reveal action,
- * logger, and (for tests) the unlink implementation.
+ * @param deps - root directory, preset store, per-session selection store,
+ * global-default reader, effective-selection resolver, reveal action, logger,
+ * and (for tests) the unlink implementation.
  * @returns route entries carrying an `id` for tests plus the webserver's fields.
  */
 export function createRoutes(deps) {
-  const { root, store, active, reveal, log, unlink = unlinkSync, write = writeFileSync } = deps
+  const { root, store, active, selection, effective, reveal, log, unlink = unlinkSync, write = writeFileSync } = deps
 
   const guarded = handler => async (req, res) => {
     if (!isTrustedLocalRequest(req.headers)) {
@@ -109,7 +153,29 @@ export function createRoutes(deps) {
           send(res, 405, { error: 'use GET' })
           return
         }
-        send(res, 200, { ...store.roster(active()), root })
+        const session = sessionParam(req.url)
+        const echo = session === null ? active() : effective(session)
+        send(res, 200, { ...store.roster(echo), root, overridden: session !== null && selection.has(session) })
+      }),
+    },
+    {
+      id: 'select',
+      kind: 'exact',
+      path: '/plugins/soul-preset/select',
+      handler: guarded(async (req, res) => {
+        if (req.method !== 'POST') {
+          send(res, 405, { error: 'use POST' })
+          return
+        }
+        const request = await readSelection(req)
+        if (request.session === undefined) {
+          send(res, request.status, { error: 'body must be {session, id?} with ids matching their rules' })
+          return
+        }
+        // Shape-valid and idempotent by construction: a repeated selection, or
+        // a reset for a session that never chose, is the same success.
+        selection.set(request.session, request.id)
+        send(res, 200, { active: effective(request.session), overridden: selection.has(request.session) })
       }),
     },
     {

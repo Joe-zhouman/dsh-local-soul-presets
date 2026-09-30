@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { decodeRoster, presetLabels, activeRow } from '../src/client-state.mjs'
+import { FOLLOW_DEFAULT, decodeRoster, presetLabels, activeRow } from '../src/client-state.mjs'
 
 const ROSTER = {
   presets: [
@@ -17,6 +17,17 @@ test('解码合法 roster，保留坏预设的原因', () => {
   assert.deepEqual(decoded.presets.map(p => p.id), ['translate', 'review', 'broken'])
   assert.equal(decoded.presets[2].broken, 'preset must name the preset')
   assert.equal(decoded.root, ROSTER.root)
+})
+
+test('overridden 只有在响应明确为 true 时才成立', () => {
+  assert.equal(decodeRoster({ ...ROSTER, overridden: true }).overridden, true)
+  assert.equal(decodeRoster(ROSTER).overridden, false)
+  assert.equal(decodeRoster({ ...ROSTER, overridden: 'yes' }).overridden, false)
+  assert.equal(decodeRoster({}).overridden, false)
+})
+
+test('FOLLOW_DEFAULT 不是合法预设 id 的形状，永不与 roster 行冲突', () => {
+  assert.match(FOLLOW_DEFAULT, /^__/, '哨兵必须长得就不像预设 id')
 })
 
 test('畸形输入解码成空 roster 而不是抛错', () => {

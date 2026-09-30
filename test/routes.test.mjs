@@ -10,19 +10,39 @@ function harness({ host = '127.0.0.1:3080', origin, unlink, write } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'soul-routes-'))
   writeFileSync(join(root, 'translate.toml'), 'preset = "翻译"\n[Prompt]\nSystem = "T"\n')
   const logged = []
+  const store = createPresetStore(root)
+  // The per-session override map the select route writes and the roster echoes.
+  const overrides = new Map()
+  const selection = {
+    get: sessionId => overrides.get(sessionId),
+    has: sessionId => overrides.has(sessionId),
+    set: (sessionId, preset) => {
+      if (preset === null) overrides.delete(sessionId)
+      else overrides.set(sessionId, preset)
+      return true
+    },
+  }
+  const active = () => 'translate'
+  const effective = sessionId => {
+    const override = selection.get(sessionId)
+    return override !== undefined && store.has(override) ? override : active()
+  }
   const routes = createRoutes({
     root,
-    store: createPresetStore(root),
-    active: () => 'translate',
+    store,
+    active,
+    selection,
+    effective,
     reveal: async () => ({ opened: false, path: root }),
     log: message => { logged.push(message) },
     ...unlink === undefined ? {} : { unlink },
     ...write === undefined ? {} : { write },
   })
-  const call = async (id, { method = 'GET', body = '' } = {}) => {
+  const call = async (id, { method = 'GET', body = '', url } = {}) => {
     const route = routes.find(candidate => candidate.id === id)
     const req = {
       method,
+      url: url ?? route.path,
       headers: { host, ...origin === undefined ? {} : { origin } },
       async *[Symbol.asyncIterator]() { yield Buffer.from(body) },
     }
@@ -36,14 +56,14 @@ function harness({ host = '127.0.0.1:3080', origin, unlink, write } = {}) {
     await route.handler(req, res)
     return res
   }
-  return { root, routes, call, logged, cleanup: () => rmSync(root, { recursive: true, force: true }) }
+  return { root, routes, call, logged, overrides, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }
 
-test('三条路由的 (kind,path) 互不重复——重复会在 webServer 注册时抛错并杀掉 host', () => {
+test('四条路由的 (kind,path) 互不重复——重复会在 webServer 注册时抛错并杀掉 host', () => {
   const h = harness()
   const keys = h.routes.map(route => `${route.kind} ${route.path}`)
   assert.equal(new Set(keys).size, keys.length, keys.join(', '))
-  assert.deepEqual(h.routes.map(route => route.kind), ['exact', 'exact', 'exact'])
+  assert.deepEqual(h.routes.map(route => route.kind), ['exact', 'exact', 'exact', 'exact'])
   h.cleanup()
 })
 
@@ -55,7 +75,72 @@ test('roster 返回预设、active 与目录路径', async () => {
   assert.deepEqual(payload.presets.map(p => p.id), ['translate'])
   assert.equal(payload.active, 'translate')
   assert.equal(payload.root, h.root)
+  assert.equal(payload.overridden, false, '无 session 参数就是默认视图')
   h.cleanup()
+})
+
+test('roster 带 ?session= 回显该会话的生效预设与覆盖标记', async () => {
+  const h = harness()
+  h.overrides.set('session-a', 'translate')
+  const res = await h.call('roster', { url: '/plugins/soul-preset/roster?session=session-a' })
+  const payload = JSON.parse(res.body)
+  assert.equal(payload.active, 'translate')
+  assert.equal(payload.overridden, true)
+  const plain = await h.call('roster', { url: '/plugins/soul-preset/roster?session=session-b' })
+  assert.equal(JSON.parse(plain.body).overridden, false)
+  h.cleanup()
+})
+
+test('roster 的 session 参数非法时按默认视图回答，而不是报错', async () => {
+  const h = harness()
+  for (const bad of ['not-a-session', '../escape', 'sess_../../x']) {
+    const res = await h.call('roster', { url: `/plugins/soul-preset/roster?session=${encodeURIComponent(bad)}` })
+    assert.equal(res.statusCode, 200, bad)
+    assert.equal(JSON.parse(res.body).overridden, false, bad)
+  }
+  h.cleanup()
+})
+
+test('select 写入会话覆盖并回显生效值，重置后回落默认', async () => {
+  const h = harness()
+  const set = await h.call('select', { method: 'POST', body: JSON.stringify({ session: 'session-a', id: 'translate' }) })
+  assert.equal(set.statusCode, 200)
+  assert.deepEqual(JSON.parse(set.body), { active: 'translate', overridden: true })
+  assert.equal(h.overrides.has('session-a'), true)
+  const reset = await h.call('select', { method: 'POST', body: JSON.stringify({ session: 'session-a' }) })
+  assert.equal(reset.statusCode, 200)
+  assert.equal(JSON.parse(reset.body).overridden, false)
+  assert.equal(h.overrides.has('session-a'), false)
+  h.cleanup()
+})
+
+test('select 拒绝坏 session、坏 id、非对象 JSON 与超长 body，且不写覆盖', async () => {
+  const h = harness()
+  for (const body of [
+    JSON.stringify({ session: 'not-a-session', id: 'translate' }),
+    JSON.stringify({ session: 'session-a', id: '../escape' }),
+    JSON.stringify({ session: 'session-a', id: 42 }),
+    'null', '"text"', '42',
+  ]) {
+    const res = await h.call('select', { method: 'POST', body })
+    assert.equal(res.statusCode, 400, body)
+  }
+  const huge = await h.call('select', { method: 'POST', body: JSON.stringify({ session: 'session-a', id: 'translate', pad: 'a'.repeat(9000) }) })
+  assert.equal(huge.statusCode, 413)
+  assert.equal(h.overrides.size, 0)
+  h.cleanup()
+})
+
+test('select 非 POST 返回 405，非回环 Host 一律 403', async () => {
+  const h = harness()
+  const wrong = await h.call('select', { method: 'GET' })
+  assert.equal(wrong.statusCode, 405)
+  h.cleanup()
+  const evil = harness({ host: 'evil.example:3080', origin: 'http://evil.example:3080' })
+  const refused = await evil.call('select', { method: 'POST', body: JSON.stringify({ session: 'session-a', id: 'translate' }) })
+  assert.equal(refused.statusCode, 403)
+  assert.equal(evil.overrides.size, 0)
+  evil.cleanup()
 })
 
 test('POST 按模板建文件，已存在的 id 被拒', async () => {

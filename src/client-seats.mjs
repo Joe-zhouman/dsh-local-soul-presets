@@ -11,7 +11,7 @@
  * synthesized one with undefined.
  * @module dsh-local-soul-presets/src/client-seats
  */
-import { PRESETS_ROUTE, REVEAL_ROUTE, ROSTER_ROUTE, decodeRoster } from './client-state.mjs'
+import { PRESETS_ROUTE, REVEAL_ROUTE, ROSTER_ROUTE, SELECT_ROUTE, decodeRoster } from './client-state.mjs'
 
 /** Bundle id, as the profile's cordis patch row names it. */
 const ID = 'dsh-local-soul-presets'
@@ -29,6 +29,8 @@ export const ZH = {
   chipStale: '预设已失效',
   switchTitle: '切换预设',
   currentLabel: '预设',
+  defaultMark: '默认',
+  followDefault: '跟随默认',
   stale: '当前选择指向的预设已不存在或已损坏，请重新选择。',
   brokenPrefix: '不可用',
   newPreset: '新建',
@@ -53,11 +55,14 @@ export const ZH = {
 export const inject = ['slots', 'configForms', 'locale', 'remote']
 
 /**
- * Read the roster from the Host.
+ * Read the roster from the Host, resolved for one session when asked.
+ * @param sessionId - the session whose effective selection to read, or none for
+ * the deployment's default view.
  * @returns the decoded roster.
  */
-async function loadRoster() {
-  const response = await fetch(ROSTER_ROUTE, { headers: { accept: 'application/json' } })
+async function loadRoster(sessionId) {
+  const query = sessionId === undefined ? '' : `?session=${encodeURIComponent(sessionId)}`
+  const response = await fetch(`${ROSTER_ROUTE}${query}`, { headers: { accept: 'application/json' } })
   if (!response.ok) throw new Error(`roster request failed with ${String(response.status)}`)
   return decodeRoster(await response.json())
 }
@@ -83,12 +88,13 @@ function messageOf(error) {
  * Concurrent callers share one request — all three surfaces refresh on mount —
  * but a read that began before a mutation cannot answer for it, so a mutation
  * marks the running read stale and the loop repeats exactly once.
+ * @param load - the fetcher, receiving whatever `refresh` was last given.
  * @returns a snapshot store over the roster, with an action-failure seat.
  */
-export function createRosterReader() {
+export function createRosterReader(load = loadRoster) {
   let state = {
     status: 'loading',
-    roster: { presets: [], active: null, root: '' },
+    roster: { presets: [], active: null, overridden: false, root: '' },
     error: null,
     actionError: null,
   }
@@ -110,9 +116,9 @@ export function createRosterReader() {
   let repeat = false
   const set = next => { state = { ...state, ...next }; emit() }
 
-  async function read() {
+  async function read(arg) {
     try {
-      set({ status: 'ready', roster: await loadRoster(), error: null })
+      set({ status: 'ready', roster: await load(arg), error: null })
     } catch (error) {
       // A failed read keeps the last rows on screen rather than blanking the
       // list, and records why.
@@ -128,15 +134,16 @@ export function createRosterReader() {
     },
     /**
      * Read the roster, sharing the request with any concurrent caller.
+     * @param arg - forwarded to the fetcher (the session to resolve for).
      * @returns the settled request.
      */
-    refresh() {
+    refresh(arg) {
       if (inFlight === null) {
         inFlight = (async () => {
           try {
             do {
               repeat = false
-              await read()
+              await read(arg)
             } while (repeat)
           } finally {
             // The promise must always be released, even if a future change to
@@ -179,8 +186,20 @@ export function createRosterReader() {
 export function createSeats(ctx) {
   ctx.effect(() => ctx.locale.register(NS, { zh: ZH }), `${ID}: dictionaries`)
   const selection = ctx.configForms.get(SOUL_PRESET_ENTRY)
-  const roster = createRosterReader()
-  const refresh = () => roster.refresh()
+
+  // The session view remembers the last session it resolved for: surfaces hand
+  // their sessionId on every refresh, and a mutation that cannot know it (create,
+  // delete, a default switch made on the settings page) still re-reads the same
+  // session's view instead of swapping the chip to the default view mid-flight.
+  const sessionLoader = (() => {
+    let last
+    return sessionId => {
+      if (sessionId !== undefined) last = sessionId
+      return loadRoster(last)
+    }
+  })()
+  const roster = createRosterReader(sessionLoader)
+  const defaults = createRosterReader(loadRoster)
 
   /**
    * Send one same-origin request, refusing to treat a failed status as success.
@@ -204,42 +223,70 @@ export function createSeats(ctx) {
     }
   }
 
-  // User actions report into the shared state instead of rejecting: the UI fires
+  // User actions report into both readers instead of rejecting: the UI fires
   // them without awaiting, so a rejected promise would surface as an unhandled
-  // rejection and the failure would be invisible.
+  // rejection and the failure would be invisible. Both surfaces show their own
+  // reader's failure line, and a failure anywhere is worth seeing everywhere.
   const runAction = async action => {
     roster.beginAction()
+    defaults.beginAction()
     try {
       await action()
     } catch (error) {
-      roster.reportFailure(messageOf(error))
+      const message = messageOf(error)
+      roster.reportFailure(message)
+      defaults.reportFailure(message)
     }
   }
 
-  // A mutation must also invalidate the roster read: a read already in flight
-  // began before the change, so without this the caller is handed the
-  // pre-mutation snapshot and the list stays wrong.
-  const runMutation = action => runAction(async () => {
-    await action()
-    roster.invalidate()
-    await roster.refresh()
-  })
+  // A mutation must also invalidate the reads of every reader it can move: a
+  // read already in flight began before the change, so without this the caller
+  // is handed the pre-mutation snapshot and the list stays wrong. `readers` is
+  // the refresh scope — the session reader for a session-scoped switch, both
+  // for directory or default changes.
+  const runMutation = (action, readers = [roster, defaults]) =>
+    runAction(async () => {
+      await action()
+      for (const reader of readers) reader.invalidate()
+      await Promise.all(readers.map(reader => reader.refresh()))
+    })
 
   const select = id => runMutation(() => selection.set('active', id))
+  const selectSession = (sessionId, id) =>
+    runMutation(() => request('POST', SELECT_ROUTE, { session: sessionId, id }), [roster])
+  const resetSession = sessionId =>
+    runMutation(() => request('POST', SELECT_ROUTE, { session: sessionId }), [roster])
   const create = id => runMutation(() => request('POST', PRESETS_ROUTE, { id }))
   const remove = id => runMutation(() => request('DELETE', PRESETS_ROUTE, { id }))
   const reveal = () => runAction(() => request('POST', REVEAL_ROUTE))
 
-  // One seat object shared by all three surfaces: the same roster reader and the
-  // same config form, so a switch made from either surface moves all of them.
-  const seat = { roster, selection, select, create, remove, reveal, refresh }
+  // One seat object shared by all three surfaces: the same roster readers and
+  // the same config form, so a switch made from either surface moves all of them.
+  const seat = {
+    roster,
+    defaults,
+    selection,
+    select,
+    selectSession,
+    resetSession,
+    create,
+    remove,
+    reveal,
+    refresh: sessionId => roster.refresh(sessionId),
+  }
 
   ctx.effect(() => {
     const disposers = [
       ctx.remote?.$on?.('settings/document-updated', ns => {
-        if (ns === SOUL_PRESET_ENTRY) void roster.refresh()
+        if (ns === SOUL_PRESET_ENTRY) {
+          void roster.refresh()
+          void defaults.refresh()
+        }
       }),
-      ctx.on('connection/reset', () => { void roster.refresh() }),
+      ctx.on('connection/reset', () => {
+        void roster.refresh()
+        void defaults.refresh()
+      }),
     ].filter(Boolean)
     return () => { for (const dispose of disposers) dispose() }
   }, `${ID}: roster invalidations`)

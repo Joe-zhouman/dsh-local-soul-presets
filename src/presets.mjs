@@ -168,9 +168,21 @@ export function createPresetStore(root) {
 
   return {
     /**
+     * Whether an id currently names a usable preset: present in the directory
+     * and not broken. The per-session selection resolves against this, so an
+     * override whose preset vanished degrades to the default instead of to
+     * nothing.
+     * @param id - a preset id.
+     * @returns true when the id is selectable right now.
+     */
+    has(id) {
+      const preset = load().byId.get(id)
+      return preset !== undefined && preset.broken === undefined
+    },
+    /**
      * The roster plus the requested active id, echoed back so the caller can
      * tell a stale selection from a live one.
-     * @param active - the id the settings hold, or null.
+     * @param active - the id the caller holds, or null.
      * @returns the rows and the active id.
      */
     roster(active) {

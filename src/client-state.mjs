@@ -16,10 +16,20 @@ export const ROSTER_ROUTE = '/plugins/soul-preset/roster'
 export const PRESETS_ROUTE = '/plugins/soul-preset/presets'
 export const REVEAL_ROUTE = '/plugins/soul-preset/reveal'
 
+/** The route that sets or clears one session's own preset selection. */
+export const SELECT_ROUTE = '/plugins/soul-preset/select'
+
+/**
+ * The menu row id that means "stop overriding; follow the default again". Not a
+ * preset id shape on purpose, so it can never collide with a roster row.
+ */
+export const FOLLOW_DEFAULT = '__follow_default__'
+
 /**
  * Decode one roster response.
  * @param payload - the parsed JSON, of unknown shape.
- * @returns the rows, the active id, and the directory path; empty when malformed.
+ * @returns the rows, the active id, the override flag, and the directory path;
+ * empty when malformed.
  */
 export function decodeRoster(payload) {
   const source = payload !== null && typeof payload === 'object' ? payload : {}
@@ -37,6 +47,7 @@ export function decodeRoster(payload) {
   return {
     presets,
     active: typeof source.active === 'string' && source.active !== '' ? source.active : null,
+    overridden: source.overridden === true,
     root: typeof source.root === 'string' ? source.root : '',
   }
 }

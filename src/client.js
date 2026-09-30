@@ -17,7 +17,7 @@ import * as React from 'react'
 import { Button, IconChevronDownOutlineRegular, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createSeats } from './client-seats.mjs'
 import { installStyles } from './client-styles.mjs'
-import { activeRow, presetLabels } from './client-state.mjs'
+import { FOLLOW_DEFAULT, activeRow, presetLabels } from './client-state.mjs'
 
 export { inject } from './client-seats.mjs'
 
@@ -43,7 +43,9 @@ function useQaMode({ sessionId, useSessions }) {
 }
 
 /**
- * The current preset as one line, or the stale-selection notice.
+ * The current preset as one line, or the stale-selection notice. A selection
+ * that comes from the deployment default rather than the session's own choice
+ * is marked as such, so "默认" reads as "inherited", not "chosen here".
  * @param props - the injected `t` and the decoded roster.
  * @returns the line, the notice, or null when nothing is selected.
  */
@@ -54,8 +56,9 @@ function SelectionHint({ t, roster }) {
   }
   if (current === null) return null
   const labels = presetLabels(current)
+  const label = roster.overridden ? t('currentLabel') : `${t('currentLabel')}（${t('defaultMark')}）`
   return React.createElement('div', { 'data-dsh-soul-preset-line': '' },
-    React.createElement('span', null, `${t('currentLabel')}：${labels.name}`),
+    React.createElement('span', null, `${label}：${labels.name}`),
     labels.hint === '' ? null : React.createElement('span', null, ` · ${labels.hint}`),
   )
 }
@@ -91,37 +94,54 @@ function presetRowLabel(t, labels, broken) {
 }
 
 /**
- * The composer chip and, while open, the switch list.
- * @param props - seat fields plus `t`.
+ * The composer chip and, while open, the switch list. Selecting a row sets THIS
+ * session's own preset; a session that has done so also sees the 「跟随默认」
+ * row, which clears the override and returns it to the deployment default.
+ * @param props - seat fields plus `t` and the session-scoped slot props.
  * @returns the chip element.
  */
 function PresetChip(props) {
-  const { t, roster, select, refresh } = props
+  const { t, roster, selectSession, resetSession, refresh } = props
   const qa = useQaMode(props)
+  const sessionId = props.sessionId
   const [open, setOpen] = React.useState(false)
   const snapshot = useStore(roster)
   const active = snapshot.roster.active
   const current = activeRow(snapshot.roster)
   const label = active !== null && current === null
     ? t('chipStale')
-    : current === null ? t('chipEmpty') : presetLabels(current).name
+    : current === null
+      ? t('chipEmpty')
+      : snapshot.roster.overridden ? presetLabels(current).name : `${t('defaultMark')}·${presetLabels(current).name}`
 
-  React.useEffect(() => { if (qa) void refresh() }, [qa, refresh])
+  React.useEffect(() => { if (qa) void refresh(sessionId) }, [qa, refresh, sessionId])
 
   const items = snapshot.roster.presets.length === 0
     ? [{ type: 'label', id: 'empty', text: t('empty') }]
-    : snapshot.roster.presets.map(row => ({
-      id: row.id,
-      disabled: row.broken !== undefined,
-      label: presetRowLabel(t, presetLabels(row), row.broken),
-    }))
+    : [
+      ...snapshot.roster.overridden
+        ? [{
+          id: FOLLOW_DEFAULT,
+          label: React.createElement('span', { className: 'dsh-sp-row dsh-sp-row-follow', 'data-dsh-soul-preset-follow': '' },
+            React.createElement('span', { className: 'dsh-sp-row-name' }, t('followDefault'))),
+        }]
+        : [],
+      ...snapshot.roster.presets.map(row => ({
+        id: row.id,
+        disabled: row.broken !== undefined,
+        label: presetRowLabel(t, presetLabels(row), row.broken),
+      })),
+    ]
 
   if (!qa) return null
   return React.createElement(Menu, {
     open,
     items,
     selectedId: active ?? undefined,
-    onSelect: id => { setOpen(false); void select(id) },
+    onSelect: id => {
+      setOpen(false)
+      void (id === FOLLOW_DEFAULT ? resetSession(sessionId) : selectSession(sessionId, id))
+    },
     onClose: () => { setOpen(false) },
     // Upward from the composer and out of its clipping card, which is how the
     // mode selector next to it opens.
@@ -139,7 +159,7 @@ function PresetChip(props) {
       'aria-haspopup': 'menu',
       'aria-expanded': open,
       title: t('switchTitle'),
-      onClick: () => { setOpen(value => !value); if (!open) void refresh() },
+      onClick: () => { setOpen(value => !value); if (!open) void refresh(sessionId) },
     },
       React.createElement('span', { className: 'dsh-sp-chip-label' }, label),
       React.createElement('span', {
@@ -152,14 +172,14 @@ function PresetChip(props) {
 
 /**
  * The name-and-hint line above the composer card.
- * @param props - seat fields plus `t`.
+ * @param props - seat fields plus `t` and the session-scoped slot props.
  * @returns the dock line.
  */
 function PresetDock(props) {
   const { t, roster, refresh } = props
   const qa = useQaMode(props)
   const snapshot = useStore(roster)
-  React.useEffect(() => { if (qa) void refresh() }, [qa, refresh])
+  React.useEffect(() => { if (qa) void refresh(props.sessionId) }, [qa, refresh, props.sessionId])
   const notice = snapshot.actionError ?? snapshot.error
   if (!qa) return null
   return React.createElement('div', { 'data-dsh-soul-preset-dock': '' },
@@ -171,17 +191,19 @@ function PresetDock(props) {
 }
 
 /**
- * The management section: list, create, delete with confirmation, reveal. The
- * section carries no heading — the Settings shell renders the registration's
- * label in its navigation, as it does for every other section.
+ * The management section: list, create, delete with confirmation, reveal. This
+ * surface reads the deployment's DEFAULT view and its select action sets the
+ * default — the per-session choice lives in the composer chip. The section
+ * carries no heading — the Settings shell renders the registration's label in
+ * its navigation, as it does for every other section.
  * @param props - seat fields plus `t`.
  * @returns the settings section element.
  */
 function ManagementSection(props) {
-  const { t, roster, select, create, remove, reveal, refresh } = props
-  const snapshot = useStore(roster)
+  const { t, defaults, select, create, remove, reveal } = props
+  const snapshot = useStore(defaults)
   const [pending, setPending] = React.useState(null)
-  React.useEffect(() => { void refresh() }, [refresh])
+  React.useEffect(() => { void defaults.refresh() }, [defaults])
   const notice = snapshot.actionError ?? snapshot.error
 
   const rows = snapshot.roster.presets.map(row => {
@@ -246,7 +268,7 @@ function ManagementSection(props) {
       }, t('openFolder')),
       React.createElement(Button, {
         key: 'reload', variant: 'outline', 'data-dsh-soul-preset-reload': '',
-        onClick: () => { void refresh() },
+        onClick: () => { void defaults.refresh() },
       }, t('reload')),
     ),
   )

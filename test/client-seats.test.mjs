@@ -9,7 +9,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { PRESETS_ROUTE, REVEAL_ROUTE, ROSTER_ROUTE } from '../src/client-state.mjs'
+import { PRESETS_ROUTE, REVEAL_ROUTE, ROSTER_ROUTE, SELECT_ROUTE } from '../src/client-state.mjs'
 import { createSeats, inject } from '../src/client-seats.mjs'
 import { guardServices } from './support/fake-client-ctx.mjs'
 
@@ -92,9 +92,9 @@ function mount(h) {
   return h.registrations[0].options.inject()
 }
 
-/** Count the roster reads a harness observed. */
+/** Count the roster reads a harness observed (the session view appends ?session=). */
 function reads(h) {
-  return h.calls.filter(call => call.url === ROSTER_ROUTE).length
+  return h.calls.filter(call => call.url.startsWith(ROSTER_ROUTE)).length
 }
 
 test('声明需要的服务', () => {
@@ -124,29 +124,64 @@ test('注册三个界面到约定的 list 槽，每个注册都带真的组件�
   }
 })
 
-test('select 写 settings 的 active 并刷新 roster', async () => {
+test('select（设置页）写 settings 的 active 并刷新两个 roster 视图', async () => {
   const h = harness()
   try {
     const seat = mount(h)
     await seat.select('draft')
     assert.deepEqual(h.writes, [{ field: 'active', value: 'draft' }])
-    assert.equal(reads(h), 1, '改动之后必须重新读一次')
+    assert.equal(reads(h), 2, '默认视图与会话视图都要重读一次')
   } finally {
     h.restore()
   }
 })
 
-test('create 用 POST 送 id，remove 用 DELETE 送 id，两者随后都重新读一次', async () => {
+test('selectSession 只 POST select 路由与会话键，重置不带 id，都只刷新会话视图', async () => {
+  const h = harness()
+  try {
+    const seat = mount(h)
+    await seat.selectSession('session-a', 'draft')
+    assert.deepEqual(h.calls[0], { url: SELECT_ROUTE, method: 'POST', body: { session: 'session-a', id: 'draft' } })
+    assert.equal(reads(h), 1, '会话内的选择不碰默认视图')
+    h.calls.length = 0
+    await seat.resetSession('session-a')
+    assert.deepEqual(h.calls[0], { url: SELECT_ROUTE, method: 'POST', body: { session: 'session-a' } })
+    assert.equal(reads(h), 1)
+    assert.deepEqual(h.writes, [], '会话选择不再写全局 settings')
+  } finally {
+    h.restore()
+  }
+})
+
+test('会话视图的读取带 ?session=，并记住最近一次会话', async () => {
+  const h = harness()
+  try {
+    const seat = mount(h)
+    await seat.refresh('session-a')
+    assert.equal(h.calls[0].url, `${ROSTER_ROUTE}?session=session-a`)
+    await seat.refresh('session-b')
+    assert.equal(h.calls[1].url, `${ROSTER_ROUTE}?session=session-b`)
+    h.calls.length = 0
+    await seat.create('draft')
+    assert.ok(h.calls.some(call => call.url === `${ROSTER_ROUTE}?session=session-b`),
+      '不知道会话的动作（create）重读时沿用最近的会话视图，而不是退回默认视图')
+    assert.ok(h.calls.some(call => call.url === ROSTER_ROUTE), '默认视图也要重读')
+  } finally {
+    h.restore()
+  }
+})
+
+test('create 用 POST 送 id，remove 用 DELETE 送 id，两者随后都重读两个视图', async () => {
   const h = harness()
   try {
     const seat = mount(h)
     await seat.create('draft')
-    assert.deepEqual(h.calls.map(call => call.method), ['POST', 'GET'])
+    assert.deepEqual(h.calls.map(call => call.method), ['POST', 'GET', 'GET'])
     assert.deepEqual(h.calls[0].body, { id: 'draft' })
     assert.equal(h.calls[0].url, PRESETS_ROUTE)
     h.calls.length = 0
     await seat.remove('draft')
-    assert.deepEqual(h.calls.map(call => call.method), ['DELETE', 'GET'])
+    assert.deepEqual(h.calls.map(call => call.method), ['DELETE', 'GET', 'GET'])
     assert.deepEqual(h.calls[0].body, { id: 'draft' })
   } finally {
     h.restore()
@@ -199,7 +234,7 @@ test('改动与在途刷新并发时，会再读一次并拿到改动后的列�
     const created = seat.create('draft')
     held.open()
     await Promise.all([inFlight, created])
-    assert.equal(reads(h), 2, '在途的读取早于改动，必须补读一次')
+    assert.equal(reads(h), 3, '在途的读取早于改动，会话视图补读一次，默认视图也要读一次')
     assert.deepEqual(seat.roster.getSnapshot().roster.presets.map(p => p.id), ['translate', 'draft'])
   } finally {
     h.restore()
@@ -299,7 +334,7 @@ test('注册中文文案字典，且覆盖界面用到的键', () => {
     mount(h)
     assert.equal(h.dictionaries[0].ns, 'localSoulPreset')
     const zh = h.dictionaries[0].dict.zh
-    for (const key of ['nav', 'chipEmpty', 'chipStale', 'switchTitle', 'currentLabel', 'stale', 'newPreset', 'remove', 'confirmRemove', 'openFolder', 'rootLabel', 'reload', 'empty']) {
+    for (const key of ['nav', 'chipEmpty', 'chipStale', 'switchTitle', 'currentLabel', 'defaultMark', 'followDefault', 'stale', 'newPreset', 'remove', 'confirmRemove', 'openFolder', 'rootLabel', 'reload', 'empty']) {
       assert.equal(typeof zh[key], 'string', key)
     }
   } finally {

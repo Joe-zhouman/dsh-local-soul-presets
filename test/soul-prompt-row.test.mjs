@@ -45,8 +45,10 @@ function workspace(fileName, text) {
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
-/** One assembly context naming a session working directory. */
-const assemble = dir => ({ agent: { session: { header: { cwd: dir } } } })
+/** One assembly context naming a session working directory (and id, optionally). */
+const assemble = (dir, id) => ({
+  agent: { session: { header: { cwd: dir, ...id === undefined ? {} : { id } } } },
+})
 
 test('开启 presets 时逐字采用服务给的文本', () => {
   // The workspace append belongs to the service (`promptText(cwd)` composes
@@ -105,6 +107,19 @@ test('显式开了 presets 的行即使处于 append 模式也采用服务文本
   const { ctx, section } = rowContext({ service: { promptText: () => 'PRESET TEXT' } })
   apply(ctx, { mode: 'append', presets: true, persona: 'PERSONA', file: 'CHAT.md' })
   assert.equal(section().text(assemble(ws.dir)), 'PRESET TEXT')
+  ws.cleanup()
+})
+
+test('服务收到会话 id 作为第二参，header 缺 id 时传 undefined', () => {
+  const ws = workspace('SOUL.md', 'X')
+  const calls = []
+  const { ctx, section } = rowContext({
+    service: { promptText: (cwd, sessionId) => { calls.push(sessionId); return 'PRESET TEXT' } },
+  })
+  apply(ctx, { mode: 'replace', presets: true })
+  section().text(assemble(ws.dir, 'session-abc'))
+  section().text(assemble(ws.dir))
+  assert.deepEqual(calls, ['session-abc', undefined])
   ws.cleanup()
 })
 
