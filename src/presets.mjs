@@ -200,6 +200,17 @@ export function createPresetStore(root) {
       }
     },
     /**
+     * The assembled text of one preset, addressed by id and without the
+     * workspace file — the `$id` gesture injects the preset alone.
+     * @param id - a preset id.
+     * @returns the text, or undefined when the id names no usable preset — the
+     * gesture then leaves the token as ordinary prose.
+     */
+    textById(id) {
+      const preset = load().byId.get(id)
+      return preset !== undefined && preset.broken === undefined ? preset.text : undefined
+    },
+    /**
      * The composed prompt text for one session directory.
      * @param cwd - the session's working directory.
      * @param active - the id the settings hold, or null.

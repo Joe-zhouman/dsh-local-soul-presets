@@ -14,16 +14,18 @@ import { join } from 'node:path'
  * A Host context whose services are real enough to catch misuse: `provide`/`get`
  * behave like cordis, `webServer.register` refuses a duplicate route the way the
  * real one does, and `loader/volatile-update` reaches the listener the plugin
- * registered.
- * @param options - the value the Config reference starts from.
- * @returns the context, the Config argument, and the recorded routes and effects.
+ * registered. The registered listeners stay reachable so a test can drive the
+ * `agent/pre-step` waterfall by hand.
+ * @param options - the values the Config reference starts from.
+ * @returns the context, the Config argument, and the recorded routes, effects,
+ * and listeners.
  */
 export function fakeCtx({ settings = {} } = {}) {
   const services = new Map()
   const routes = []
   const effects = []
   const listeners = new Map()
-  let current = { active: '', ...settings }
+  let current = { active: '', expand: true, ...settings }
   const ctx = {
     logger: { info() {}, warn() {} },
     webServer: {
@@ -41,21 +43,32 @@ export function fakeCtx({ settings = {} } = {}) {
     effect: factory => { effects.push(factory()) },
     on: (event, handler) => { listeners.set(event, handler); return () => {} },
   }
-  // Loader commits the new value before it announces the update, so the
-  // reference moves first and the listener follows.
+  // Loader commits the new values before it announces the update, so the
+  // references move first and the listener follows.
   ctx.__set = next => {
-    current = next
+    current = { ...current, ...next }
     listeners.get('loader/volatile-update')?.()
   }
-  return { ctx, config: { active: { get: () => current.active } }, routes, effects }
+  return {
+    ctx,
+    config: { active: { get: () => current.active }, expand: { get: () => current.expand } },
+    routes,
+    effects,
+    listeners,
+  }
 }
 
 /**
  * Run one test body against a temporary DSH_HOME holding one preset.
+ *
+ * The body's completion is awaited before the cleanup: an async body that
+ * suspends at its first `await` would otherwise resume after the `finally`
+ * below has already deleted the directory, and the store's next scan would
+ * find an empty world.
  * @param run - the test body.
  * @returns whatever the body returns.
  */
-export function withPresetRoot(run) {
+export async function withPresetRoot(run) {
   const home = mkdtempSync(join(tmpdir(), 'soul-home-'))
   // apply() scans $DSH_HOME/soul-presets, so the fixture must sit one level
   // BELOW the DSH_HOME this test injects. Writing translate.toml at the top
@@ -67,7 +80,7 @@ export function withPresetRoot(run) {
   const previous = process.env.DSH_HOME
   process.env.DSH_HOME = home
   try {
-    return run()
+    return await run()
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous

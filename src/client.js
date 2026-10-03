@@ -65,14 +65,15 @@ function SelectionHint({ t, roster }) {
 
 /**
  * One switch-list row's body: the name, then whatever else identifies the
- * preset — its description and hint, or the reason it cannot be selected.
+ * preset — its description and hint, the `$id` the gesture names, or the reason
+ * it cannot be selected.
  * @param t - the seat's dictionary.
- * @param labels - the row's display labels.
- * @param broken - the parse failure, when the row has one.
+ * @param row - one roster row.
  * @returns the label node the menu row renders.
  */
-function presetRowLabel(t, labels, broken) {
-  const parts = broken === undefined
+function presetRowLabel(t, row) {
+  const labels = presetLabels(row)
+  const parts = row.broken === undefined
     ? [
       labels.description === '' ? null : React.createElement('span', {
         key: 'description', className: 'dsh-sp-row-part', 'data-dsh-soul-preset-description': '',
@@ -80,10 +81,13 @@ function presetRowLabel(t, labels, broken) {
       labels.hint === '' ? null : React.createElement('span', {
         key: 'hint', className: 'dsh-sp-row-part', 'data-dsh-soul-preset-hint': '',
       }, labels.hint),
+      React.createElement('span', {
+        key: 'id', className: 'dsh-sp-row-part dsh-sp-row-id', 'data-dsh-soul-preset-id': '',
+      }, `$${row.id}`),
     ].filter(part => part !== null)
     : [React.createElement('span', {
       key: 'broken', className: 'dsh-sp-row-part dsh-sp-row-broken', 'data-dsh-soul-preset-broken': '',
-    }, `${t('brokenPrefix')}：${broken}`)]
+    }, `${t('brokenPrefix')}：${row.broken}`)]
   const note = parts.flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))
   return React.createElement('span', { className: 'dsh-sp-row' },
     React.createElement('span', {
@@ -129,7 +133,7 @@ function PresetChip(props) {
       ...snapshot.roster.presets.map(row => ({
         id: row.id,
         disabled: row.broken !== undefined,
-        label: presetRowLabel(t, presetLabels(row), row.broken),
+        label: presetRowLabel(t, row),
       })),
     ]
 
@@ -238,6 +242,7 @@ function ManagementSection(props) {
         labels.description === ''
           ? null
           : React.createElement('span', { 'data-dsh-soul-preset-row-desc': '' }, labels.description),
+        React.createElement('span', { 'data-dsh-soul-preset-row-id': '' }, `$${row.id}`),
         row.broken === undefined
           ? null
           : React.createElement('span', { 'data-dsh-soul-preset-broken': '' }, `${t('brokenPrefix')}：${row.broken}`),
@@ -248,6 +253,7 @@ function ManagementSection(props) {
 
   return React.createElement('section', { 'data-dsh-soul-preset-settings': '' },
     React.createElement('p', { 'data-dsh-soul-preset-root': '' }, `${t('rootLabel')}：${snapshot.roster.root}`),
+    React.createElement('p', { 'data-dsh-soul-preset-gesture': '' }, t('gestureHint')),
     notice === null
       ? null
       : React.createElement('p', { 'data-dsh-soul-preset-error': '' }, notice),

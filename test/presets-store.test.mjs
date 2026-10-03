@@ -61,6 +61,15 @@ test('悬空 active 返回 null，坏预设也不注入', () => {
   rmSync(root, { recursive: true, force: true })
 })
 
+test('textById 按id取正文：可用返回、坏或缺失返回 undefined，不拼 SOUL.md', () => {
+  const root = fixture()
+  const store = createPresetStore(root)
+  assert.equal(store.textById('translate'), 'T')
+  assert.equal(store.textById('broken'), undefined)
+  assert.equal(store.textById('gone'), undefined)
+  rmSync(root, { recursive: true, force: true })
+})
+
 test('工作区 SOUL.md 追加在预设之后，空或缺或超限则跳过', () => {
   const root = fixture()
   const ws = mkdtempSync(join(tmpdir(), 'soul-ws-'))

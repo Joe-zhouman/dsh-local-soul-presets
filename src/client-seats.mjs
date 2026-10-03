@@ -41,6 +41,7 @@ export const ZH = {
   openFolder: '打开预设目录',
   rootLabel: '预设目录',
   reload: '重新载入',
+  gestureHint: '在任意模式的输入框发送「$id 内容」，可把该预设作为一段提示词注入当轮对话（如 $translate 要翻译的段落）；未知或损坏的 id 保持原样。',
   empty: '这个目录里还没有预设。新建一个，或手动放入 .toml 文件。',
 }
 

@@ -109,6 +109,19 @@ export const CSS_TEXT = `
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* The $id a prompt can name to inject the preset: the one place the row
+   speaks in a monospace face, so the token reads as typed, not as prose. */
+.dsh-sp-row-id,
+[data-dsh-soul-preset-row-id] {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+[data-dsh-soul-preset-row-id] {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 /* The 「跟随默认」 row sits above the roster once a session carries its own
    override. Muted like a caption: it is an action, not a preset to pick. */
 .dsh-sp-row-follow .dsh-sp-row-name {

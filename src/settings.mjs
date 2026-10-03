@@ -24,8 +24,12 @@ const ACTIVE_ID = new RegExp(`^(?:${PRESET_ID.source})?$`, PRESET_ID.flags)
 
 /**
  * An empty string means "no preset selected"; anything else must be a preset
- * id, because the value is used to look up a file name.
+ * id, because the value is used to look up a file name. `expand` gates the
+ * `$id` gesture in every mode's composer; it is volatile for the same reason
+ * as `active` — a write settles into the running reference as a live ref the
+ * listener cache re-reads, not a plain boolean that only a remount would move.
  */
 export const SoulPresetSettings = z.object({
   active: z.string().pattern(ACTIVE_ID).default('').volatile(),
+  expand: z.boolean().default(true).volatile(),
 })

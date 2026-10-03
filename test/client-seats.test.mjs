@@ -334,7 +334,7 @@ test('注册中文文案字典，且覆盖界面用到的键', () => {
     mount(h)
     assert.equal(h.dictionaries[0].ns, 'localSoulPreset')
     const zh = h.dictionaries[0].dict.zh
-    for (const key of ['nav', 'chipEmpty', 'chipStale', 'switchTitle', 'currentLabel', 'defaultMark', 'followDefault', 'stale', 'newPreset', 'remove', 'confirmRemove', 'openFolder', 'rootLabel', 'reload', 'empty']) {
+    for (const key of ['nav', 'chipEmpty', 'chipStale', 'switchTitle', 'currentLabel', 'defaultMark', 'followDefault', 'stale', 'newPreset', 'remove', 'confirmRemove', 'openFolder', 'rootLabel', 'reload', 'gestureHint', 'empty']) {
       assert.equal(typeof zh[key], 'string', key)
     }
   } finally {
