@@ -14,7 +14,7 @@
  * @module dsh-local-soul-presets/src/client
  */
 import * as React from 'react'
-import { Button, IconChevronDownOutlineRegular, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronDownOutlineRegular, Menu, rankByName } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createSeats } from './client-seats.mjs'
 import { installStyles } from './client-styles.mjs'
 import { FOLLOW_DEFAULT, activeRow, presetLabels } from './client-state.mjs'
@@ -286,7 +286,7 @@ function ManagementSection(props) {
  */
 export function apply(ctx) {
   ctx.effect(() => installStyles(), 'dsh-local-soul-presets: stylesheet')
-  createSeats(ctx).registerSurfaces({
+  createSeats(ctx, { rankByName }).registerSurfaces({
     chip: PresetChip,
     dock: PresetDock,
     settings: ManagementSection,

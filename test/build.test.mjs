@@ -164,6 +164,7 @@ function loadClient(reactImpl = react) {
   })
   const registrations = []
   const writes = []
+  const triggerSources = []
   exported.apply(guardServices({
     effect: factory => { factory() },
     locale: { register: () => {}, bind: () => key => key },
@@ -178,11 +179,12 @@ function loadClient(reactImpl = react) {
       inject: (slot, factory) => { factory() },
       register: (options, component) => { registrations.push({ options, component }); return () => {} },
     },
+    inputTriggers: { registerSource: source => { triggerSources.push(source); return () => {} } },
     on: () => () => {},
     remote: { $on: () => () => {} },
   }, exported.inject))
   const seat = registrations[0].options.inject()
-  return { registration, exported, registrations, writes, seat, primitives }
+  return { registration, exported, registrations, writes, seat, primitives, triggerSources }
 }
 
 /**
@@ -305,12 +307,16 @@ test('客户端产物是模块加载器工厂，而不是 ESM 模块', () => {
 
 test('客户端产物真的注册三个界面，且只向模块表要两个平台模块', () => {
   assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
-  const { registration, exported, registrations } = loadClient()
+  const { registration, exported, registrations, triggerSources } = loadClient()
   assert.equal(registration.id, 'dsh-local-soul-presets')
-  assert.deepEqual(exported.inject, ['slots', 'configForms', 'locale', 'remote'])
+  assert.deepEqual(exported.inject, ['slots', 'configForms', 'locale', 'remote', 'inputTriggers'])
   assert.deepEqual(registrations.map(entry => entry.options.name), [
     'conversation.input.left', 'conversation.input.dock', 'settings.section',
   ])
+  assert.deepEqual(triggerSources.map(source => [source.trigger, source.name]), [['$', 'soul-preset']],
+    '产物必须注册 $ 触发源')
+  assert.deepEqual(triggerSources[0].onPick({ candidate: { name: 'translate' } }), { text: '$translate ' },
+    'pick 插入字面 token')
   for (const entry of registrations) {
     assert.equal(typeof entry.component, 'function', `${entry.options.id} must register a component`)
     const seat = entry.options.inject()
@@ -448,6 +454,18 @@ test('读取失败也会渲染出来，动作提示缺席时用读取失败顶�
   const element = findByProp(registrations[1].component(props), 'data-dsh-soul-preset-error')
   assert.ok(element !== undefined, '读取失败必须渲染出来')
   assert.deepEqual(element.children, [readFailure])
+})
+
+test('产物交互：$ 菜单候选经平台 rankByName 过滤', async () => {
+  assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
+  await withFetch(async () => {
+    const { triggerSources } = loadClient()
+    const source = triggerSources[0]
+    const ask = query => source.candidates({ sessionId: 's' }, { query, signal: new AbortController().signal })
+    assert.deepEqual((await ask('tran')).map(row => row.name), ['translate'], '子串命中保留')
+    assert.deepEqual(await ask('zzz'), [], '无命中给空列表')
+    assert.ok((await ask('')).length > 0, '空查询返回全量')
+  })
 })
 
 test('产物交互：chip 把切换列表交给共用菜单，选行 POST 本会话的 select 并刷新列表', async () => {

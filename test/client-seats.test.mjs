@@ -56,6 +56,7 @@ function harness({ respond = null } = {}) {
   const dictionaries = []
   const bound = []
   const listeners = new Map()
+  const triggerSources = []
   return {
     ctx: guardServices({
       effect: factory => { factory() },
@@ -74,10 +75,11 @@ function harness({ respond = null } = {}) {
         inject: (slot, factory) => { factory() },
         register: (options, component) => { registrations.push({ options, component }); return () => {} },
       },
+      inputTriggers: { registerSource: source => { triggerSources.push(source); return () => {} } },
       on: (event, handler) => { listeners.set(event, handler); return () => {} },
       remote: { $on: (event, handler) => { listeners.set(event, handler); return () => {} } },
     }, inject),
-    calls, writes, registrations, dictionaries, bound, listeners,
+    calls, writes, registrations, dictionaries, bound, listeners, triggerSources,
     restore: () => { globalThis.fetch = original },
   }
 }
@@ -98,9 +100,68 @@ function reads(h) {
 }
 
 test('声明需要的服务', () => {
-  // `remote` is here because cordis throws on reading an undeclared service —
-  // optional chaining at the call site cannot substitute for the declaration.
-  assert.deepEqual(inject, ['slots', 'configForms', 'locale', 'remote'])
+  // `remote` 与 `inputTriggers` 在这里是因为 cordis 对未声明服务的读取直接
+  // 抛错——调用点的可选链替代不了声明。
+  assert.deepEqual(inject, ['slots', 'configForms', 'locale', 'remote', 'inputTriggers'])
+})
+
+test('注册 $ 触发源：pick 插入字面 token，候选来自 roster、经平台排序过滤', async () => {
+  const h = harness({ respond: () => ({
+    ok: true, status: 200,
+    json: async () => ({
+      presets: [
+        { id: 'translate', name: '翻译助手', description: '中英互译', hint: '贴段落' },
+        { id: 'draft', name: 'draft' },
+        { id: 'broken', broken: '缺 preset 字段' },
+      ],
+      active: 'translate', root: 'L:\\x',
+    }),
+  }) })
+  const rankCalls = []
+  const rankByName = (rows, query) => { rankCalls.push(query); return rows }
+  try {
+    createSeats(h.ctx, { rankByName }).registerSurfaces(STUBS)
+    assert.equal(h.triggerSources.length, 1, '恰好注册一个触发源')
+    const source = h.triggerSources[0]
+    assert.equal(source.trigger, '$')
+    assert.equal(source.name, 'soul-preset')
+    assert.equal(source.order, 3)
+    const rows = await source.candidates({ sessionId: 'session-a' }, { query: 'tran', signal: new AbortController().signal })
+    assert.deepEqual(rows, [
+      { name: 'translate', label: '翻译助手', description: '中英互译 · 贴段落' },
+      { name: 'draft', label: 'draft' },
+    ])
+    assert.deepEqual(rankCalls, ['tran'], '击键查询原样交给平台排序')
+    assert.deepEqual(source.onPick({ candidate: rows[0] }), { text: '$translate ' }, 'pick 只插字面 token')
+    const controller = new AbortController()
+    controller.abort()
+    assert.deepEqual(
+      await source.candidates({ sessionId: 'session-a' }, { query: '', signal: controller.signal }),
+      [],
+      '已放弃的击键返回空列表',
+    )
+  } finally {
+    h.restore()
+  }
+})
+
+test('候选共享一次 roster 读取，动作之后失效重读', async () => {
+  const h = harness()
+  try {
+    const seat = mount(h)
+    const source = h.triggerSources[0]
+    const ask = () => source.candidates({ sessionId: 'session-a' }, { query: '', signal: new AbortController().signal })
+    const menuReads = () => h.calls.filter(call => call.url === ROSTER_ROUTE).length
+    await ask()
+    await ask()
+    assert.equal(menuReads(), 1, '两次击键共享默认视图的一次读取')
+    await seat.select('translate')
+    assert.equal(menuReads(), 3, 'select 顺带刷新两个 roster 视图（各一次默认视图读取）')
+    await ask()
+    assert.equal(menuReads(), 4, '菜单缓存已被动作丢掉，下一次击键重读')
+  } finally {
+    h.restore()
+  }
 })
 
 test('注册三个界面到约定的 list 槽，每个注册都带真的组件与对象座位', () => {

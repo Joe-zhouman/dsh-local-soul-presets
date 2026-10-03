@@ -11,7 +11,7 @@
 
 /** Client service names cordis guards on read. */
 const GUARDED = [
-  'slots', 'configForms', 'locale', 'remote', 'modelDirectories', 'sessions', 'uiWorkspace', 'connection',
+  'slots', 'configForms', 'locale', 'remote', 'inputTriggers', 'modelDirectories', 'sessions', 'uiWorkspace', 'connection',
 ]
 
 /**
