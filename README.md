@@ -137,6 +137,7 @@ Assistant = '''
 - **插件客户端注册 `'$'` 触发源**（`name: 'soul-preset'`，`order: 3`，排在命令与技能之后）：候选来自 roster（跳过坏预设；`name`=id、`label`=显示名、`description`=简介 · hint），过滤排序交给平台 `rankByName`（与 `/` 菜单同一算法，大小写不敏感子序列、前缀优先）——它经 `createSeats(ctx, { rankByName })` 注入，因为这个模块要保持 `node --test` 可解析、不能自己 import 平台模块。pick 插入字面 `$id `（与 ui-skill 同款 PickOutcome）。候选共享一次 roster 读取，动作与远端失效时丢弃。
 - **行为对齐 `/`**：发送后用户气泡里 `$id` 渲染为虚线下划线 chip（不可点击，无预览面板接线）；注入正文在对话里不可见（与技能指令注入一样被 chat-visibility 过滤，但轨迹视图可见其标签）。**Enter 不补全**——与技能一致：Enter 走裁定/发送路径（输入机只对 `/` 开头的行做裁定），补全用 Tab 或点击候选行；菜单被忽略后同查询不重开（换查询重开）。`${` 模板、`$$`、词中 `$` 不触发；`$x$` 类数学定界符后紧跟光标时菜单可能闪现，空格即消。
 - **无补丁的部署上优雅降级**：`registerSource` 对 trigger 字符不校验，`$` 源静默注册但永不触发（detect 不认识）；chip 不渲染；host 侧手势照常工作。
+- **桌面端（安装版 Electron）**：web 端补丁落在 L:\dsh 检出源码；桌面端运行时独立（app.asar 内逐包产物），需用字节级 asar 补丁复刻同样三处改动——工具与流程见部署机 `.local-deploy/desktop-asar-patch/` 与 `README-soul-presets.md`「桌面端同步」一节（夜间更新会覆盖，需重打）。
 
 ## 三条路由与它们的守卫
 
