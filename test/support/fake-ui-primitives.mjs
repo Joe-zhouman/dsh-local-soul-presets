@@ -15,11 +15,6 @@
 
 /**
  * Build the fake primitive module for one React implementation.
- *
- * `rankByName` mirrors the real contract's filtering shape (empty query keeps
- * everything; otherwise only substring hits survive, prefix first) — the exact
- * subsequence scoring is the platform module's own tested behavior, not this
- * bundle's.
  * @param react - the recording React the bundle also received.
  * @returns the exports `@deepseek-ai/dsh-client-ui-primitives` provides to this bundle.
  */
@@ -41,15 +36,5 @@ export function fakeUiPrimitives(react) {
         : null),
     Button: () => null,
     IconChevronDownOutlineRegular: () => null,
-    rankByName: (items, query) => {
-      if (query === '') return items
-      const q = query.toLowerCase()
-      const hit = row => [row.name, row.label].some(key => key !== undefined && key.toLowerCase().includes(q))
-      const prefix = row => [row.name, row.label].some(key => key !== undefined && key.toLowerCase().startsWith(q))
-      return [
-        ...items.filter(row => prefix(row)),
-        ...items.filter(row => !prefix(row) && hit(row)),
-      ]
-    },
   }
 }

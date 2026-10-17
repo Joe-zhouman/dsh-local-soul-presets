@@ -7,7 +7,7 @@
 | 项 | 值 |
 |---|---|
 | 包名 | `dsh-local-soul-presets` |
-| 版本 | `0.1.4`（`private`，不发布） |
+| 版本 | `0.1.5`（`private`，不发布） |
 | 部署机工作副本 | `L:\dsh\.local-deploy\soul-presets-plugin\`（即本仓库的检出） |
 | 类型 | host + client bundle（`dsh.client.platform: web`，自带 `dsh.bundle.patch`） |
 | 安装 spec | `file:L:/dsh/.local-deploy/soul-presets-plugin` |
@@ -35,7 +35,7 @@ cp deploy/preset.yml deploy/agent.cordis.yml "$DSH_HOME/.agent-presets/qa/"
 # 3) 重启 web 服务
 ```
 
-装好后在设置页「预设提示词」分区新建／删除预设，或把 `.toml` 直接放进 `$DSH_HOME/soul-presets/`；问答模式 composer 的 chip 切换当前预设，下一轮提问生效，无需重开会话。任何模式的输入框里发送「`$id 内容`」可把该预设作为一段提示词注入当轮对话（见「`$` 手势」一节）。
+装好后在设置页「预设提示词」分区新建／删除预设，或把 `.toml` 直接放进 `$DSH_HOME/soul-presets/`；问答模式 composer 的 chip 切换当前预设，下一轮提问生效，无需重开会话。
 
 注意两条：
 
@@ -112,32 +112,11 @@ Assistant = '''
 
 因为系统提示词是每次组装重读的（`soul-prompt.mjs` 的 `mode: replace` 语义），**切换与改文件都在下一轮提问生效，不需要重开会话，也不需要重启服务**。实测：新建一个 `.toml` 后直接读 roster 路由即可看到它，无需重启。
 
-## `$` 手势：任意模式把预设当一段提示词注入（0.1.3）
+## `$` 手势已移除（0.1.5）
 
-预设不止能当问答模式的系统提示词。在**任何模式**的输入框里发送「`$id 内容`」，命中的预设作为一条注入的提示词消息追加进当轮对话；发送者的气泡保留 `$id` 原文。机制与 dsh 的 `/技能名` 手势同构：host 半区在 `agent/pre-step` waterfall 里扫描**用户来源**的消息（`source.kind === 'user'`，注入消息与外部文本不能伪造手势），把预设正文（`assemblePrompt` 的拼装原文，**不拼** `SOUL.md`）包进标签注入：
+0.1.3 引入的 `$id` 手势（任意模式把预设注入当轮对话）与 0.1.4 的 `$` 触发菜单在 0.1.5 整体移除：实际使用频率不高，而完整体验依赖对 dsh 检出的四处未提交补丁（`ui-input-trigger` 的 `TriggerChar` 封闭联合、`ui-conversation` 镜像类型、`ui-primitives` 的 `projectUserText` token 识别、`ui-chat` 的气泡投影）与桌面端 app.asar 字节补丁，随版本更新的维护成本大于价值。预设回到唯一入口：问答模式的系统提示词（每会话覆盖或全局默认，见上节）。
 
-```
-<soul-preset id="translate">
-<预设拼装正文>
-</soul-preset>
-```
-
-- 监听器注册在 app 级插件上，而 `agent/pre-step` 是 agent-loop 事件（app 级监听先例：session-controller 的 archived-session-gate），所以 qa、chat、未来任何模式一律生效，不需要每行接线。注入消息随 accepted batch 落 `user/message` 会话事件，model-visible ⟺ logged 成立。
-- **词法**：`(^|\s)\$([a-z0-9][a-z0-9-]*)(?=\s|$)`，与 `/技能名` 同规则——`$PATH`（大写）、`$x$`（后随 `$` 不满足 lookahead）、紧跟标点的 `$translate，` 都保持字面；`$100` 词法上命中（id 允许数字），是否展开由目录里有没有叫 `100` 的预设决定。命中的 id 不存在或已损坏时 token 保持字面，不报错。同一消息多个 `$id` 按首现序去重、各注入一条。
-- 注入消息的 source 是 `{kind: 'soul-preset-expansion', id}`。`MessageSourceMap` 是 merge-extensible 的、消费方对未知 kind 按约定 fall through（`packages/llm/llm/src/message.ts` 的契约），气泡按通用用户消息渲染，靠 `<soul-preset>` 标签自描述。
-- **配置开关**：`local-soul-presets` 条目的 `config.expand`（默认 `true`；`false` 时手势静默关闭）。改动经 volatile-update 刷新缓存，下一轮生效，不重挂载。
-- 消息对象手写在 `src/expand.mjs`（`crypto.randomUUID()` + 深冻结，对齐 `createUserMessage` 的产物），不 import `@deepseek-ai/dsh-llm`——插件保持零 dsh 依赖，branding 只是编译期概念。
-- 界面：chip 切换列表与设置页每行现在都带一行等宽的 `$id`，设置页首部有一句用法说明。0.1.3 没有 `$` 触发菜单（`TriggerChar` 是仓库封闭联合，加 `$` 要改 `packages/` 源码）；0.1.4 起带上文的本地 dsh 补丁补齐了它。
-
-## `$` 菜单与手势气泡（0.1.4，需要本地 dsh 补丁）
-
-上一节的"不改仓库"定位在 0.1.4 被明确突破：用户要求 `$` 的输入体验与 `/技能名` 完全一致，而触发菜单与气泡渲染都长在 dsh 仓库自己的管线里（`TriggerChar` 封闭联合、`projectUserText` 只认 `@`/`/` token）。因此：
-
-- **本机 dsh 检出带四处未提交的本地补丁**（见部署机 `.local-deploy/README-soul-presets.md` 的清单）：`ui-input-trigger`（`TriggerChar` 加 `'$'`、detect 扫描集与 `$$`/`${` 豁免、双语 README）、`ui-conversation`（9 处镜像联合类型）、`ui-primitives`（`projectUserText` 认 `$name` token，新增 `presetNames` allow-list 与 `data-ref-chip="preset"`）、`ui-chat`（`soul-preset-expansion` 的名字投影与气泡透传）。改完必须 `pnpm run build` 重建客户端产物再重启。
-- **插件客户端注册 `'$'` 触发源**（`name: 'soul-preset'`，`order: 3`，排在命令与技能之后）：候选来自 roster（跳过坏预设；`name`=id、`label`=显示名、`description`=简介 · hint），过滤排序交给平台 `rankByName`（与 `/` 菜单同一算法，大小写不敏感子序列、前缀优先）——它经 `createSeats(ctx, { rankByName })` 注入，因为这个模块要保持 `node --test` 可解析、不能自己 import 平台模块。pick 插入字面 `$id `（与 ui-skill 同款 PickOutcome）。候选共享一次 roster 读取，动作与远端失效时丢弃。
-- **行为对齐 `/`**：发送后用户气泡里 `$id` 渲染为虚线下划线 chip（不可点击，无预览面板接线）；注入正文在对话里不可见（与技能指令注入一样被 chat-visibility 过滤，但轨迹视图可见其标签）。**Enter 不补全**——与技能一致：Enter 走裁定/发送路径（输入机只对 `/` 开头的行做裁定），补全用 Tab 或点击候选行；菜单被忽略后同查询不重开（换查询重开）。`${` 模板、`$$`、词中 `$` 不触发；`$x$` 类数学定界符后紧跟光标时菜单可能闪现，空格即消。
-- **无补丁的部署上优雅降级**：`registerSource` 对 trigger 字符不校验，`$` 源静默注册但永不触发（detect 不认识）；chip 不渲染；host 侧手势照常工作。
-- **桌面端（安装版 Electron）**：web 端补丁落在 L:\dsh 检出源码；桌面端运行时独立（app.asar 内逐包产物），需用字节级 asar 补丁复刻同样三处改动——工具与流程见部署机 `.local-deploy/desktop-asar-patch/` 与 `README-soul-presets.md`「桌面端同步」一节（夜间更新会覆盖，需重打）。
+升级注意两条：profile 补丁里若写过 `config.expand` 要删掉（字段已不在 schema 里）；旧会话日志中已存在的 `soul-preset-expansion` 注入消息按通用用户消息回放（`MessageSourceMap` 对未知 kind 约定 fall through），不需要迁移。
 
 ## 四条路由与它们的守卫
 
@@ -224,7 +203,7 @@ pnpm dsh plugin --profile web add "file:L:/dsh/.local-deploy/soul-presets-plugin
 - **`lib/client.js` 从模块表取 `@deepseek-ai/dsh-client-ui-primitives`**（外壳自带的平台模块，不需要额外安装），`tsdown.config.mjs` 的 `MODULE_TABLE_KEYS` 因此多了一项；它必须保持 `require`，被内联就会带上 `react-dom` 并丢掉"与访问模式同一个菜单"这件事。
 - **样式表是一份注入的 `<style>`**（`src/client-styles.mjs`），不是 CSS module：本包的 tsdown 配置没有样式管线，而模块系统本来就认插件注入的标签——`data-plugin` 是移除键（`removeOwnedStyles`），`data-plugin-css` 是同一张表的去重键。类名带 `dsh-sp-` 前缀（它们活在页面的全局样式表里），值一律用 `--dsw-*` token，明暗主题都跟着走。设置页那一节也不再自带 `<h2>`：外壳用注册时的 `label` 渲染左侧导航项，原先那个标题是重复的。
 
-浏览器探针：chip 仍是 `[data-dsh-soul-preset-chip]`，行内文本是 `[data-dsh-soul-preset-name|description|hint|id]`；**`[data-dsh-soul-preset-menu]` 没有了**，列表 DOM 现在归共用菜单所有，打开时用 `[role="menu"]` 定位（同一时刻页面里只有它一个）。设置页新增 `[data-dsh-soul-preset-row-text|row-desc|row-id|gesture|select|actions|confirm|cancel|remove|new|reveal|reload|toolbar]`，`root`／`broken`／`error` 不变。
+浏览器探针：chip 仍是 `[data-dsh-soul-preset-chip]`，行内文本是 `[data-dsh-soul-preset-name|description|hint]`；**`[data-dsh-soul-preset-menu]` 没有了**，列表 DOM 现在归共用菜单所有，打开时用 `[role="menu"]` 定位（同一时刻页面里只有它一个）。设置页新增 `[data-dsh-soul-preset-row-text|row-desc|select|actions|confirm|cancel|remove|new|reveal|reload|toolbar]`，`root`／`broken`／`error` 不变。
 
 ## 测试
 
@@ -234,7 +213,7 @@ export PATH="/d/softwares/node-v24.21.0-win-x64:$PATH"
 pnpm test
 ```
 
-135 个用例，覆盖：拼装字节与尺寸上限、TOML 解析与坏预设分类、逐文件 mtime 快照（含原地改写）、settings schema 与校验、模板可反解、回环 Host／Origin 守卫（含点分四段的越界段）、四条路由的方法分派与拒绝路径（含删除时 ENOENT 与其他失败的区分）、roster 解码与名称／简介／hint 映射、每会话选择（select 与重置路由、覆盖→默认→defaultPrompt 的裁决链、`.selections.json` 的持久化、500 条上限与陈旧行清理）、客户端动作发出的真实请求与失败可见性、并发刷新只读一次、改动与在途刷新并发时会补读一次、动作成功但随后读取失败时读取失败仍可见、删除时 ENOENT 与 EPERM 的不同响应、订阅者抛错不会把共享 store 卡死、**`$` 手势**（词法命中与不命中、去重序、注入字节、冻结的消息对象、只扫用户来源、`expand` 开关与运行时切换、构建产物里的监听器与行内 `$id` 渲染）、**`$` 触发源**（源形状、pick 产物、候选行映射与坏预设跳过、击键查询交给平台排序、共享读取与动作失效、构建产物里的注册与过滤），以及**构建产物本身**——`test/build.test.mjs` 会先跑一次真实构建，再导入 `lib/index.js`、用模块表加载器执行 `lib/client.js`、驱动它自己的 `apply()` 注册三个界面，并用录制的 React 真正调用 dock 与设置页组件，断言失败提示确实被渲染出来（删掉那两个错误元素会让测试变红）。另有 `test/soul-prompt-row.test.mjs` 覆盖部署侧的 `soul-prompt.mjs`（开关、服务缺席与返回 null 的回退、append 模式、`interpolate: false`），以及 `test/reveal.test.mjs` 覆盖目录 opener 的平台与失败路径。`test/build.test.mjs` 还把**构建后的宿主入口**放回同一套假 ctx 里跑一遍（不只对导出名做断言），并用带钩子状态的渲染器真的点一次 chip 的预设行、点一次删除再确认，断言选择写入与 DELETE 各发生一次。`test/soul-prompt-row.test.mjs` 另有两例固定两种快照语义：`append` 对同一 agent 只取一次（长对话的系统提示词必须字节稳定），`replace` 每次重读（一问一答没有前缀要保护）。**本插件不进 dsh 仓库的测试脚手架，也不改动它。**
+121 个用例，覆盖：拼装字节与尺寸上限、TOML 解析与坏预设分类、逐文件 mtime 快照（含原地改写）、settings schema 与校验、模板可反解、回环 Host／Origin 守卫（含点分四段的越界段）、四条路由的方法分派与拒绝路径（含删除时 ENOENT 与其他失败的区分）、roster 解码与名称／简介／hint 映射、每会话选择（select 与重置路由、覆盖→默认→defaultPrompt 的裁决链、`.selections.json` 的持久化、500 条上限与陈旧行清理）、客户端动作发出的真实请求与失败可见性、并发刷新只读一次、改动与在途刷新并发时会补读一次、动作成功但随后读取失败时读取失败仍可见、删除时 ENOENT 与 EPERM 的不同响应、订阅者抛错不会把共享 store 卡死，以及**构建产物本身**——`test/build.test.mjs` 会先跑一次真实构建，再导入 `lib/index.js`、用模块表加载器执行 `lib/client.js`、驱动它自己的 `apply()` 注册三个界面，并用录制的 React 真正调用 dock 与设置页组件，断言失败提示确实被渲染出来（删掉那两个错误元素会让测试变红）。另有 `test/soul-prompt-row.test.mjs` 覆盖部署侧的 `soul-prompt.mjs`（开关、服务缺席与返回 null 的回退、append 模式、`interpolate: false`），以及 `test/reveal.test.mjs` 覆盖目录 opener 的平台与失败路径。`test/build.test.mjs` 还把**构建后的宿主入口**放回同一套假 ctx 里跑一遍（不只对导出名做断言），并用带钩子状态的渲染器真的点一次 chip 的预设行、点一次删除再确认，断言选择写入与 DELETE 各发生一次。`test/soul-prompt-row.test.mjs` 另有两例固定两种快照语义：`append` 对同一 agent 只取一次（长对话的系统提示词必须字节稳定），`replace` 每次重读（一问一答没有前缀要保护）。**本插件不进 dsh 仓库的测试脚手架，也不改动它。**
 
 界面改版后又加了三类：**产物只向模块表要两个平台模块**（`react` 与 `@deepseek-ai/dsh-client-ui-primitives` 都必须以 `require("…")` 出现，而不是被内联——内联会捎上 `react-dom`，而加载器遇到模块表答不上来的 specifier 会让整份用例失败）；**样式表按插件标记注入且只有一份**（用假 document 断言 `data-plugin`／`data-plugin-css` 与重复激活不插第二份，并断言表里带 chip 与列表行的规则）；**chip 交给共用菜单的正是切换列表**（断言 `side`／`portal`／`selectedId`／行文本与「空目录给一行说明而不是空菜单」，点行仍写入选择）。测试替身 `test/support/fake-ui-primitives.mjs` 把共用菜单按元素层渲染出来——录制版 React 不会调用嵌套函数组件，需要展开的地方由 `expand()` 显式调用。
 

@@ -164,7 +164,6 @@ function loadClient(reactImpl = react) {
   })
   const registrations = []
   const writes = []
-  const triggerSources = []
   exported.apply(guardServices({
     effect: factory => { factory() },
     locale: { register: () => {}, bind: () => key => key },
@@ -179,12 +178,11 @@ function loadClient(reactImpl = react) {
       inject: (slot, factory) => { factory() },
       register: (options, component) => { registrations.push({ options, component }); return () => {} },
     },
-    inputTriggers: { registerSource: source => { triggerSources.push(source); return () => {} } },
     on: () => () => {},
     remote: { $on: () => () => {} },
   }, exported.inject))
   const seat = registrations[0].options.inject()
-  return { registration, exported, registrations, writes, seat, primitives, triggerSources }
+  return { registration, exported, registrations, writes, seat, primitives }
 }
 
 /**
@@ -256,8 +254,6 @@ test('构建后的宿主入口行为与源码一致：配置、服务与四条�
   assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
   const host = await import(pathToFileURL(join(root, 'lib/index.js')).href)
   assert.equal(host.Config.dict.active.meta.volatile, true)
-  assert.equal(host.Config.dict.expand.meta.default, true, '$ 手势默认开启')
-  assert.equal(host.Config.dict.expand.meta.volatile, true, 'expand 必须是 volatile 活引用，否则运行时 config.expand 没有 .get')
   withPresetRoot(() => {
     const { ctx, config, routes } = fakeCtx()
     host.apply(ctx, config)
@@ -275,24 +271,6 @@ test('构建后的宿主入口行为与源码一致：配置、服务与四条�
   })
 })
 
-test('构建后的宿主入口同样展开 $ 手势', async () => {
-  assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
-  const host = await import(pathToFileURL(join(root, 'lib/index.js')).href)
-  await withPresetRoot(async () => {
-    const { ctx, config, listeners } = fakeCtx()
-    host.apply(ctx, config)
-    const claimed = {
-      id: 'u1', role: 'user', content: [{ type: 'text', text: '$translate 你好' }], source: { kind: 'user' },
-    }
-    const out = await listeners.get('agent/pre-step')(
-      { messages: [claimed], turn: 1, step: 1, signal: new AbortController().signal },
-      async () => ({ kind: 'enter', messages: [claimed] }),
-    )
-    assert.equal(out.messages.length, 2, '产物注册的监听器必须注入命中的预设')
-    assert.equal(out.messages[1].content[0].text, '<soul-preset id="translate">\nT\n</soul-preset>')
-  })
-})
-
 test('客户端产物是模块加载器工厂，而不是 ESM 模块', () => {
   assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
   const client = readFileSync(join(root, 'lib/client.js'), 'utf8')
@@ -307,16 +285,12 @@ test('客户端产物是模块加载器工厂，而不是 ESM 模块', () => {
 
 test('客户端产物真的注册三个界面，且只向模块表要两个平台模块', () => {
   assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
-  const { registration, exported, registrations, triggerSources } = loadClient()
+  const { registration, exported, registrations } = loadClient()
   assert.equal(registration.id, 'dsh-local-soul-presets')
-  assert.deepEqual(exported.inject, ['slots', 'configForms', 'locale', 'remote', 'inputTriggers'])
+  assert.deepEqual(exported.inject, ['slots', 'configForms', 'locale', 'remote'])
   assert.deepEqual(registrations.map(entry => entry.options.name), [
     'conversation.input.left', 'conversation.input.dock', 'settings.section',
   ])
-  assert.deepEqual(triggerSources.map(source => [source.trigger, source.name]), [['$', 'soul-preset']],
-    '产物必须注册 $ 触发源')
-  assert.deepEqual(triggerSources[0].onPick({ candidate: { name: 'translate' } }), { text: '$translate ' },
-    'pick 插入字面 token')
   for (const entry of registrations) {
     assert.equal(typeof entry.component, 'function', `${entry.options.id} must register a component`)
     const seat = entry.options.inject()
@@ -398,7 +372,6 @@ test('样式表按插件标记注入一次，并带着 chip 与列表行的规�
     // rendered inside the shared menu card.
     assert.match(tags[0].textContent, /\.dsh-sp-chip\b/u)
     assert.match(tags[0].textContent, /\.dsh-sp-row-name\b/u)
-    assert.match(tags[0].textContent, /\.dsh-sp-row-id\b[^}]*font-family:/u, '手势 token 要用等宽字体')
     assert.match(tags[0].textContent, /\.dsh-sp-menu-cap\b[^}]*max-height:\s*min\(320px,/u, '切换列表必须有矮于视口适配上限的滚动上限')
     assert.match(tags[0].textContent, /\[data-dsh-soul-preset-dock\]\s*\{[^}]*padding:\s*0 16px 0;/u, '提示行不能再额外撑开输入框上方间距')
     loadClient()
@@ -456,18 +429,6 @@ test('读取失败也会渲染出来，动作提示缺席时用读取失败顶�
   assert.deepEqual(element.children, [readFailure])
 })
 
-test('产物交互：$ 菜单候选经平台 rankByName 过滤', async () => {
-  assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
-  await withFetch(async () => {
-    const { triggerSources } = loadClient()
-    const source = triggerSources[0]
-    const ask = query => source.candidates({ sessionId: 's' }, { query, signal: new AbortController().signal })
-    assert.deepEqual((await ask('tran')).map(row => row.name), ['translate'], '子串命中保留')
-    assert.deepEqual(await ask('zzz'), [], '无命中给空列表')
-    assert.ok((await ask('')).length > 0, '空查询返回全量')
-  })
-})
-
 test('产物交互：chip 把切换列表交给共用菜单，选行 POST 本会话的 select 并刷新列表', async () => {
   assert.equal(buildOnce().status, 0, 'the artifacts are only judged from a successful build')
   await withFetch(async calls => {
@@ -495,7 +456,6 @@ test('产物交互：chip 把切换列表交给共用菜单，选行 POST 本会
     assert.deepEqual(findByProp(row, 'data-dsh-soul-preset-name').children, ['翻译助手'])
     assert.deepEqual(findByProp(row, 'data-dsh-soul-preset-description').children, ['中英互译'])
     assert.deepEqual(findByProp(row, 'data-dsh-soul-preset-hint').children, ['贴段落'])
-    assert.deepEqual(findByProp(row, 'data-dsh-soul-preset-id').children, ['$translate'], '菜单行要显示手势 token')
     row.props.onClick()
     assert.deepEqual(writes, [], 'chip 选行写的是这个会话的选择，不再写全局 settings')
     const select = calls.find(call => call.method === 'POST' && call.url === SELECT_ROUTE)
@@ -556,12 +516,6 @@ test('产物交互：删除要先确认，确认后才真的发 DELETE', async (
     const settings = registrations[2].component
     const props = sessionProps(seat, 'qa')
     const first = renderer.render(settings, props)
-    assert.ok(findByProp(first, 'data-dsh-soul-preset-gesture') !== undefined, '设置页要说明 $ 手势')
-    assert.deepEqual(
-      findByProp(first, 'data-dsh-soul-preset-row-id').children,
-      ['$translate'],
-      '设置页每行要显示手势 token',
-    )
     assert.ok(findButton(first, 'remove') !== undefined, '每行都应有删除按钮')
     assert.equal(findButton(first, 'confirmRemove'), undefined, '未点删除前不该出现确认按钮')
     findButton(first, 'remove').props.onClick()

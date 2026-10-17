@@ -11,7 +11,6 @@
  * synthesized one with undefined.
  * @module dsh-local-soul-presets/src/client-seats
  */
-import { presetLabels } from './client-state.mjs'
 import { PRESETS_ROUTE, REVEAL_ROUTE, ROSTER_ROUTE, SELECT_ROUTE, decodeRoster } from './client-state.mjs'
 
 /** Bundle id, as the profile's cordis patch row names it. */
@@ -42,7 +41,6 @@ export const ZH = {
   openFolder: '打开预设目录',
   rootLabel: '预设目录',
   reload: '重新载入',
-  gestureHint: '在任意模式的输入框发送「$id 内容」，可把该预设作为一段提示词注入当轮对话（如 $translate 要翻译的段落）；未知或损坏的 id 保持原样。',
   empty: '这个目录里还没有预设。新建一个，或手动放入 .toml 文件。',
 }
 
@@ -54,7 +52,7 @@ export const ZH = {
  * `ctx.remote?.$on?.(...)` cannot protect against a missing declaration — it
  * only protects against a missing method.
  */
-export const inject = ['slots', 'configForms', 'locale', 'remote', 'inputTriggers']
+export const inject = ['slots', 'configForms', 'locale', 'remote']
 
 /**
  * Read the roster from the Host, resolved for one session when asked.
@@ -182,16 +180,10 @@ export function createRosterReader(load = loadRoster) {
 /**
  * Register the dictionary, resolve the entry's config form, build the shared
  * seat, and expose the surface registration the React half calls.
- *
- * `rankByName` arrives as an injected platform dependency (the shared
- * `/`-menu ranking from `@deepseek-ai/dsh-client-ui-primitives`): this module
- * stays resolvable by `node --test`, which has no module table, so it must not
- * import the platform module itself.
  * @param ctx - client root context, with `slots`, `configForms` and `locale` live.
- * @param platform - platform hooks the browser half supplies.
  * @returns the seat and the registrar that pairs surfaces with components.
  */
-export function createSeats(ctx, { rankByName } = {}) {
+export function createSeats(ctx) {
   ctx.effect(() => ctx.locale.register(NS, { zh: ZH }), `${ID}: dictionaries`)
   const selection = ctx.configForms.get(SOUL_PRESET_ENTRY)
 
@@ -231,29 +223,11 @@ export function createSeats(ctx, { rankByName } = {}) {
     }
   }
 
-  // The `$id` gesture menu in every mode's composer. One shared roster read
-  // serves all keystrokes; a mutation (create/delete/switch) or a roster
-  // invalidation drops the cache so the next menu reflects the directory.
-  // Pick inserts the literal `$id ` token — the Host's pre-step listener owns
-  // the expansion, exactly how `/skill-name` picks behave in ui-skill.
-  const menuRoster = { read: undefined }
-  const dropMenuRoster = () => { menuRoster.read = undefined }
-  const menuCandidates = () => {
-    if (menuRoster.read === undefined) {
-      menuRoster.read = loadRoster().then(roster => roster.presets, error => {
-        menuRoster.read = undefined
-        throw error
-      })
-    }
-    return menuRoster.read
-  }
-
   // User actions report into both readers instead of rejecting: the UI fires
   // them without awaiting, so a rejected promise would surface as an unhandled
   // rejection and the failure would be invisible. Both surfaces show their own
   // reader's failure line, and a failure anywhere is worth seeing everywhere.
   const runAction = async action => {
-    dropMenuRoster()
     roster.beginAction()
     defaults.beginAction()
     try {
@@ -286,26 +260,6 @@ export function createSeats(ctx, { rankByName } = {}) {
   const remove = id => runMutation(() => request('DELETE', PRESETS_ROUTE, { id }))
   const reveal = () => runAction(() => request('POST', REVEAL_ROUTE))
 
-  ctx.effect(() => ctx.inputTriggers.registerSource({
-    trigger: '$',
-    name: 'soul-preset',
-    order: 3,
-    candidates: async (session, { query, signal }) => {
-      const presets = await menuCandidates()
-      if (signal.aborted) return []
-      const rows = presets
-        .filter(row => row.broken === undefined)
-        .map(row => {
-          const labels = presetLabels(row)
-          const detail = [labels.description, labels.hint].filter(part => part !== '').join(' · ')
-          return { name: row.id, label: labels.name, ...detail === '' ? {} : { description: detail } }
-        })
-      return rankByName === undefined ? rows : rankByName(rows, query)
-    },
-    warm: () => { void menuCandidates().catch(() => {}) },
-    onPick: ({ candidate }) => ({ text: `$${candidate.name} ` }),
-  }), `${ID}: $ trigger source`)
-
   // One seat object shared by all three surfaces: the same roster readers and
   // the same config form, so a switch made from either surface moves all of them.
   const seat = {
@@ -325,13 +279,11 @@ export function createSeats(ctx, { rankByName } = {}) {
     const disposers = [
       ctx.remote?.$on?.('settings/document-updated', ns => {
         if (ns === SOUL_PRESET_ENTRY) {
-          dropMenuRoster()
           void roster.refresh()
           void defaults.refresh()
         }
       }),
       ctx.on('connection/reset', () => {
-        dropMenuRoster()
         void roster.refresh()
         void defaults.refresh()
       }),

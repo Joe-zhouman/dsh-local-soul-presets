@@ -14,8 +14,7 @@ import { join } from 'node:path'
  * A Host context whose services are real enough to catch misuse: `provide`/`get`
  * behave like cordis, `webServer.register` refuses a duplicate route the way the
  * real one does, and `loader/volatile-update` reaches the listener the plugin
- * registered. The registered listeners stay reachable so a test can drive the
- * `agent/pre-step` waterfall by hand.
+ * registered.
  * @param options - the values the Config reference starts from.
  * @returns the context, the Config argument, and the recorded routes, effects,
  * and listeners.
@@ -25,7 +24,7 @@ export function fakeCtx({ settings = {} } = {}) {
   const routes = []
   const effects = []
   const listeners = new Map()
-  let current = { active: '', expand: true, ...settings }
+  let current = { active: '', ...settings }
   const ctx = {
     logger: { info() {}, warn() {} },
     webServer: {
@@ -51,7 +50,7 @@ export function fakeCtx({ settings = {} } = {}) {
   }
   return {
     ctx,
-    config: { active: { get: () => current.active }, expand: { get: () => current.expand } },
+    config: { active: { get: () => current.active } },
     routes,
     effects,
     listeners,

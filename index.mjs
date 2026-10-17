@@ -1,13 +1,12 @@
 /**
  * Host half of the local soul-presets bundle.
  *
- * It owns six things and nothing else: the preset directory as a synchronous
+ * It owns five things and nothing else: the preset directory as a synchronous
  * snapshot (`soulPresets`), the `active` Config field holding the global
  * default, the per-session selection store (`.selections.json`), the
  * same-origin routes that read the roster, write per-session selections, and
- * create, delete, and reveal preset files, the service the preset-scoped
- * prompt row reads, and the `$id` gesture listener that expands named presets
- * in any mode's composer.
+ * create, delete, and reveal preset files, and the service the preset-scoped
+ * prompt row reads.
  *
  * The active id is cached in a plain variable rather than read from the Config
  * reference on demand because the prompt row's text provider is a SYNCHRONOUS
@@ -20,7 +19,6 @@
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { expansionInjections } from './src/expand.mjs'
 import { createPresetStore } from './src/presets.mjs'
 import { PRESET_ID } from './src/presets.mjs'
 import { revealDirectory } from './src/reveal.mjs'
@@ -64,17 +62,13 @@ export function apply(ctx, config) {
   })
   const selectionDep = config.active
   let active = selectionDep.get() === '' ? null : selectionDep.get()
-  const expandDep = config.expand
-  let expand = expandDep.get() !== false
 
-  // Loader commits a new value into the reference before it announces the update,
-  // and the prompt row's text provider is synchronous: refresh the cache here
-  // so the provider never awaits anything. The gesture flag rides the same
-  // event, so one config write moves both on the next turn.
+  // Loader commits a new value into the reference before it announces the
+  // update, and the prompt row's text provider is synchronous: refresh the
+  // cache here so the provider never awaits anything.
   ctx.on('loader/volatile-update', () => {
     const next = selectionDep.get()
     active = next === '' ? null : next
-    expand = expandDep.get() !== false
   })
 
   // The id one assembly runs under: the session's own override when it names a
@@ -113,18 +107,6 @@ export function apply(ctx, config) {
      */
     promptText: (cwd, sessionId) => store.text(cwd, effective(sessionId)),
   })
-
-  // The `$id` gesture: presets named in a user message enter the step as
-  // injected prompt messages. `agent/pre-step` is an agent-loop event an
-  // app-level listener hears for every agent preset, so this covers every mode
-  // without per-mode wiring. The gate reads the cached flag, so a config write
-  // takes effect on the next turn without remounting the plugin.
-  ctx.effect(() => ctx.on('agent/pre-step', async (payload, next) => {
-    const decision = await next()
-    if (decision.kind === 'reject' || !expand) return decision
-    const injections = expansionInjections(payload.messages, id => store.textById(id))
-    return injections.length === 0 ? decision : { ...decision, messages: [...decision.messages, ...injections] }
-  }), `${name}: $ gesture`)
 
   for (const route of createRoutes({
     root,

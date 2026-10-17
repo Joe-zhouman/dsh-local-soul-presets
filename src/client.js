@@ -14,7 +14,7 @@
  * @module dsh-local-soul-presets/src/client
  */
 import * as React from 'react'
-import { Button, IconChevronDownOutlineRegular, Menu, rankByName } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronDownOutlineRegular, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createSeats } from './client-seats.mjs'
 import { installStyles } from './client-styles.mjs'
 import { FOLLOW_DEFAULT, activeRow, presetLabels } from './client-state.mjs'
@@ -65,8 +65,7 @@ function SelectionHint({ t, roster }) {
 
 /**
  * One switch-list row's body: the name, then whatever else identifies the
- * preset — its description and hint, the `$id` the gesture names, or the reason
- * it cannot be selected.
+ * preset — its description and hint, or the reason it cannot be selected.
  * @param t - the seat's dictionary.
  * @param row - one roster row.
  * @returns the label node the menu row renders.
@@ -81,9 +80,6 @@ function presetRowLabel(t, row) {
       labels.hint === '' ? null : React.createElement('span', {
         key: 'hint', className: 'dsh-sp-row-part', 'data-dsh-soul-preset-hint': '',
       }, labels.hint),
-      React.createElement('span', {
-        key: 'id', className: 'dsh-sp-row-part dsh-sp-row-id', 'data-dsh-soul-preset-id': '',
-      }, `$${row.id}`),
     ].filter(part => part !== null)
     : [React.createElement('span', {
       key: 'broken', className: 'dsh-sp-row-part dsh-sp-row-broken', 'data-dsh-soul-preset-broken': '',
@@ -242,7 +238,6 @@ function ManagementSection(props) {
         labels.description === ''
           ? null
           : React.createElement('span', { 'data-dsh-soul-preset-row-desc': '' }, labels.description),
-        React.createElement('span', { 'data-dsh-soul-preset-row-id': '' }, `$${row.id}`),
         row.broken === undefined
           ? null
           : React.createElement('span', { 'data-dsh-soul-preset-broken': '' }, `${t('brokenPrefix')}：${row.broken}`),
@@ -253,7 +248,6 @@ function ManagementSection(props) {
 
   return React.createElement('section', { 'data-dsh-soul-preset-settings': '' },
     React.createElement('p', { 'data-dsh-soul-preset-root': '' }, `${t('rootLabel')}：${snapshot.roster.root}`),
-    React.createElement('p', { 'data-dsh-soul-preset-gesture': '' }, t('gestureHint')),
     notice === null
       ? null
       : React.createElement('p', { 'data-dsh-soul-preset-error': '' }, notice),
@@ -286,7 +280,7 @@ function ManagementSection(props) {
  */
 export function apply(ctx) {
   ctx.effect(() => installStyles(), 'dsh-local-soul-presets: stylesheet')
-  createSeats(ctx, { rankByName }).registerSurfaces({
+  createSeats(ctx).registerSurfaces({
     chip: PresetChip,
     dock: PresetDock,
     settings: ManagementSection,
