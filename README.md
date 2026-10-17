@@ -19,28 +19,24 @@
 
 ## 在别人的部署上安装
 
-`lib/` 预构建产物随仓库提交、包内无 prepare 脚本，所以从 git 安装不需要本地构建（包没有构建脚本也就不会触发 pnpm 的 allowBuilds 拦截）。前置：一个能跑 `dsh --profile web` 的部署，`DSH_HOME` 存在（默认 `~/.dsh`），机器上有 git。
+`lib/` 预构建产物随仓库提交、包内无 prepare 脚本，所以从 git 安装不需要本地构建（包没有构建脚本也就不会触发 pnpm 的 allowBuilds 拦截）。前置：`DSH_HOME` 存在（默认 `~/.dsh`），机器能访问 github.com（git 安装源直连，不经 registry）。
 
-```sh
-# 1) 安装插件包（二选一，github: 缩写或完整 git URL）
-dsh plugin --profile web add "github:Joe-zhouman/dsh-local-soul-presets"
-dsh plugin --profile web add "git+https://github.com/Joe-zhouman/dsh-local-soul-presets.git"
+**桌面端（安装版 Electron）**：
 
-# 2) 放置部署侧文件（deploy/ 目录里有现成的）
-mkdir -p "$DSH_HOME/preset-plugins" "$DSH_HOME/.agent-presets/qa"
-cp deploy/soul-prompt.mjs                    "$DSH_HOME/preset-plugins/"
-cp deploy/preset.yml deploy/agent.cordis.yml "$DSH_HOME/.agent-presets/qa/"
-#    然后把 agent.cordis.yml 里 soul-prompt 的 name 改成你的绝对路径（文件头有说明）
+1. 设置 → 插件 → 添加插件，填 git 地址 `https://github.com/Joe-zhouman/dsh-local-soul-presets.git`，装完点「立即启用」。CLI 拒绝 desktop profile，应用内面板是桌面端唯一的安装入口。
+2. 把 `deploy/soul-prompt.mjs` 复制到 `%USERPROFILE%\.dsh\preset-plugins\`（即 `$DSH_HOME/preset-plugins/`）。
+3. 把 `deploy/preset-qa.row.yml` 的内容追加到 `%USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml` 末尾，并把其中 `file:///` 路径改成你机器上 soul-prompt.mjs 的绝对路径（文件头有说明）。
+4. 完全退出并重开桌面应用（profile 补丁在启动时加载）。
 
-# 3) 重启 web 服务
-```
+**web 部署**：同样三步，第 1 步换成 `dsh plugin --profile web add "github:Joe-zhouman/dsh-local-soul-presets"`（或完整 git URL `git+https://github.com/Joe-zhouman/dsh-local-soul-presets.git`），第 3 步的补丁文件是 `$DSH_HOME/profiles/web/cordis.patch.yml`，第 4 步改为重启 web 服务。
 
 装好后在设置页「预设提示词」分区新建／删除预设，或把 `.toml` 直接放进 `$DSH_HOME/soul-presets/`；问答模式 composer 的 chip 切换当前预设，下一轮提问生效，无需重开会话。
 
-注意两条：
+注意三条：
 
-- **已有 `qa` 预设的部署不要覆盖**：只在你现有 `agent.cordis.yml` 的 `soul-prompt` 行 `config` 里加 `presets: true`，其余文件不动。
-- `dsh plugin add` 底层是 pnpm；git 安装源要求目标机器能访问 github.com。`soul-prompt.mjs` 同时也在本机服务 `chat` 行（`mode: append` + persona + CHAT.md），把它放进 preset-plugins 不影响没有 chat 行的部署。
+- **0.1.7 起预设是 profile 里的声明行**，`$DSH_HOME/.agent-presets/` 目录不再被读取；`deploy/preset.yml` 与 `deploy/agent.cordis.yml` 只服务于 ≤0.1.6 的旧部署。已有自己的 `qa` 预设的部署不要整个覆盖：只在你现有 preset-qa 行的 `soul-prompt` 插件 `config` 里加 `presets: true`，其余不动。
+- git 安装源要求目标机器能访问 github.com。`soul-prompt.mjs` 同时也在本机服务 `chat` 行（`mode: append` + persona + CHAT.md），把它放进 preset-plugins 不影响没有 chat 行的部署。
+- 插件的客户端半区声明 `dsh.client.platform: web`——这是 GUI 客户端（含桌面渲染器）的唯一合法值，桌面端同样加载，不需要 asar 级改动。
 
 ## 预设目录与文件格式
 
@@ -146,7 +142,7 @@ TOML 语法错误、必填字段缺失、字段类型不对、拼接超限的预
 
 1. 本插件包（host + client 两个产物）。
 2. `.dsh-home/preset-plugins/soul-prompt.mjs`：section 的函数文本在 `config.presets` 为真时优先向 `soulPresets` 服务要文本；并在同一个注册对象上声明 `interpolate: false`。
-3. `.dsh-home/.agent-presets/qa/agent.cordis.yml` 的 `soul-prompt` 行：`config` 里加 `presets: true`。**不要**给 `chat` 行加这一项。
+3. qa 预设行里 `soul-prompt` 插件的 `config` 带 `presets: true`（0.1.7 起是 profile 补丁里的 preset-qa 声明行，见 `deploy/preset-qa.row.yml`；0.1.6 及更早是 `.agent-presets/qa/agent.cordis.yml` 的 `soul-prompt` 行）。**不要**给 `chat` 行加这一项。
 
 两处细节值得单独记住：
 

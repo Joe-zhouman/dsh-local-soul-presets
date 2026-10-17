@@ -1,0 +1,22 @@
+# dsh 0.1.7+ 的 qa 预设声明行。把它整体追加到你的 profile 补丁文件末尾：
+#   桌面端  %USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml
+#   web 端  $DSH_HOME/profiles/web/cordis.patch.yml
+# 然后把 file:/// 路径改成你机器上 soul-prompt.mjs 的绝对路径（正斜杠；
+# Windows 形如 file:///C:/Users/<你>/.dsh/preset-plugins/soul-prompt.mjs）。
+# 0.1.6 及更早的部署改用本目录的 preset.yml + agent.cordis.yml（.agent-presets
+# 目录写法，0.1.7 起不再被读取）。
+- insert:
+    - id: preset-qa
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: qa
+        plugins:
+          - id: soul-prompt
+            name: file:///C:/Users/<you>/.dsh/preset-plugins/soul-prompt.mjs
+            config:
+              mode: replace
+              presets: true
+              defaultPrompt: You are a helpful assistant.
+        name: 问答模式
+        description: 零工具问答；系统提示词来自选中的预设（未选时回落工作区 SOUL.md）。
+        order: 1.5
