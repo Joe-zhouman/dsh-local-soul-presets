@@ -25,6 +25,7 @@ import { createPresetStore } from './src/presets.mjs'
 import { PRESET_ID } from './src/presets.mjs'
 import { revealDirectory } from './src/reveal.mjs'
 import { createRoutes } from './src/routes.mjs'
+import { seedPresets } from './src/seed.mjs'
 import { createSelectionStore, SESSION_ID } from './src/selection.mjs'
 import { SoulPresetSettings } from './src/settings.mjs'
 
@@ -167,12 +168,22 @@ export function apply(ctx, config) {
 
   // The directory is created on apply: the create route needs it to exist, and
   // an unusable root degrades to an empty roster rather than failing the fiber.
+  // A directory that holds no .toml of its own then receives the bundled
+  // example presets once — a fresh install starts with a usable menu instead
+  // of an empty one.
   ctx.effect(() => {
     try {
       mkdirSync(root, { recursive: true })
     } catch {
       // A read-only or missing parent leaves an empty roster; a write attempt
       // reports the failure through its own route.
+      return
+    }
+    try {
+      seedPresets({ root, log })
+    } catch {
+      // Seeding is an amenity: any failure here leaves the empty roster the
+      // deployment would have had anyway.
     }
   }, `${name}: preset root`)
 }

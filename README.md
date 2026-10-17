@@ -7,7 +7,7 @@
 | 项 | 值 |
 |---|---|
 | 包名 | `dsh-local-soul-presets` |
-| 版本 | `0.1.6`（`private`，不发布） |
+| 版本 | `0.1.7`（`private`，不发布） |
 | 部署机工作副本 | `L:\dsh\.local-deploy\soul-presets-plugin\`（即本仓库的检出） |
 | 类型 | host + client bundle（`dsh.client.platform: web`，自带 `dsh.bundle.patch`） |
 | 安装 spec | `file:L:/dsh/.local-deploy/soul-presets-plugin` |
@@ -30,13 +30,22 @@
 
 **web 部署**：同样三步，第 1 步换成 `dsh plugin --profile web add "github:Joe-zhouman/dsh-local-soul-presets"`（或完整 git URL `git+https://github.com/Joe-zhouman/dsh-local-soul-presets.git`），第 3 步的补丁文件是 `$DSH_HOME/profiles/web/cordis.patch.yml`，第 4 步改为重启 web 服务。
 
-装好后在设置页「预设提示词」分区新建／删除预设，或把 `.toml` 直接放进 `$DSH_HOME/soul-presets/`；问答模式 composer 的 chip 切换当前预设，下一轮提问生效，无需重开会话。
+装好后在设置页「预设提示词」分区新建／删除预设，或把 `.toml` 直接放进 `$DSH_HOME/soul-presets/`；问答模式 composer 的 chip 切换当前预设，下一轮提问生效，无需重开会话。全新部署的目录里没有任何 `.toml` 时，启动即自动种入随包的 35 个示例预设（见下节）——开箱就是一份能用的菜单。
 
 注意三条：
 
 - **0.1.7 起预设是 profile 里的声明行**，`$DSH_HOME/.agent-presets/` 目录不再被读取；`deploy/preset.yml` 与 `deploy/agent.cordis.yml` 只服务于 ≤0.1.6 的旧部署。已有自己的 `qa` 预设的部署不要整个覆盖：只在你现有 preset-qa 行的 `soul-prompt` 插件 `config` 里加 `presets: true`，其余不动。
 - git 安装源要求目标机器能访问 github.com。`soul-prompt.mjs` 同时也在本机服务 `chat` 行（`mode: append` + persona + CHAT.md），把它放进 preset-plugins 不影响没有 chat 行的部署。
 - 插件的客户端半区声明 `dsh.client.platform: web`——这是 GUI 客户端（含桌面渲染器）的唯一合法值，桌面端同样加载，不需要 asar 级改动。
+
+## 随包示例预设（0.1.7）
+
+包里带 35 个通用工具型示例预设（`presets/` 目录：翻译、润色、学术互译、文献格式转换、Excel／SQL／正则／commit 生成、概念讲解、思维导图、技术路线图等）。安装后，**预设目录里没有任何 `.toml` 时启动自动种入**。规则与边界：
+
+- 判据是「目录里没有 `.toml`」，不是「目录不存在」——升级到一个已被旧版本建出空目录的部署同样种入。
+- 只在启动时执行一次；**从不覆盖、从不删除**。种入的文件就是普通预设，可改可删，走同一套界面与路由。
+- 代价是「删光全部预设再重启会重新种入」；想保持空目录，留一个自己的 `.toml` 即可。
+- 人设类等私人预设不随包，各部署自备。
 
 ## 预设目录与文件格式
 
@@ -237,7 +246,7 @@ export PATH="/d/softwares/node-v24.21.0-win-x64:$PATH"
 pnpm test
 ```
 
-140 个用例，覆盖：拼装字节与尺寸上限、TOML 解析与坏预设分类（含 `[Model]` 的完整／半写／类型错误）、逐文件 mtime 快照（含原地改写）、settings schema 与校验、模板可反解、回环 Host／Origin 守卫（含点分四段的越界段）、四条路由的方法分派与拒绝路径（含删除时 ENOENT 与其他失败的区分）、roster 解码与名称／简介／hint／模型映射、每会话选择（select 与重置路由、覆盖→默认→defaultPrompt 的裁决链、`.selections.json` 的持久化、500 条上限与陈旧行清理）、默认模型（新会话仅在有模型历史前施加、已有请求头／已选模型时不动、子代理 id 形状排除、不可路由时新会话照常建立且切换仍成功、`modelError` 在界面可见）、客户端动作发出的真实请求与失败可见性、并发刷新只读一次、改动与在途刷新并发时会补读一次、动作成功但随后读取失败时读取失败仍可见、删除时 ENOENT 与 EPERM 的不同响应、订阅者抛错不会把共享 store 卡死，以及**构建产物本身**——`test/build.test.mjs` 会先跑一次真实构建，再导入 `lib/index.js`、用模块表加载器执行 `lib/client.js`、驱动它自己的 `apply()` 注册三个界面，并用录制的 React 真正调用 dock 与设置页组件，断言失败提示确实被渲染出来（删掉那两个错误元素会让测试变红）。另有 `test/soul-prompt-row.test.mjs` 覆盖部署侧的 `soul-prompt.mjs`（开关、服务缺席与返回 null 的回退、append 模式、`interpolate: false`），以及 `test/reveal.test.mjs` 覆盖目录 opener 的平台与失败路径。`test/build.test.mjs` 还把**构建后的宿主入口**放回同一套假 ctx 里跑一遍（不只对导出名做断言），并用带钩子状态的渲染器真的点一次 chip 的预设行、点一次删除再确认，断言选择写入与 DELETE 各发生一次。`test/soul-prompt-row.test.mjs` 另有两例固定两种快照语义：`append` 对同一 agent 只取一次（长对话的系统提示词必须字节稳定），`replace` 每次重读（一问一答没有前缀要保护）。**本插件不进 dsh 仓库的测试脚手架，也不改动它。**
+145 个用例，覆盖：拼装字节与尺寸上限、TOML 解析与坏预设分类（含 `[Model]` 的完整／半写／类型错误）、逐文件 mtime 快照（含原地改写）、settings schema 与校验、模板可反解、回环 Host／Origin 守卫（含点分四段的越界段）、四条路由的方法分派与拒绝路径（含删除时 ENOENT 与其他失败的区分）、roster 解码与名称／简介／hint／模型映射、每会话选择（select 与重置路由、覆盖→默认→defaultPrompt 的裁决链、`.selections.json` 的持久化、500 条上限与陈旧行清理）、默认模型（新会话仅在有模型历史前施加、已有请求头／已选模型时不动、子代理 id 形状排除、不可路由时新会话照常建立且切换仍成功、`modelError` 在界面可见）、随包示例预设（种入判据与幂等、不覆盖已有、单个失败留日志其余照种、产物从 lib/../presets 解析后空目录部署即得 35 行且全部可解析）、客户端动作发出的真实请求与失败可见性、并发刷新只读一次、改动与在途刷新并发时会补读一次、动作成功但随后读取失败时读取失败仍可见、删除时 ENOENT 与 EPERM 的不同响应、订阅者抛错不会把共享 store 卡死，以及**构建产物本身**——`test/build.test.mjs` 会先跑一次真实构建，再导入 `lib/index.js`、用模块表加载器执行 `lib/client.js`、驱动它自己的 `apply()` 注册三个界面，并用录制的 React 真正调用 dock 与设置页组件，断言失败提示确实被渲染出来（删掉那两个错误元素会让测试变红）。另有 `test/soul-prompt-row.test.mjs` 覆盖部署侧的 `soul-prompt.mjs`（开关、服务缺席与返回 null 的回退、append 模式、`interpolate: false`），以及 `test/reveal.test.mjs` 覆盖目录 opener 的平台与失败路径。`test/build.test.mjs` 还把**构建后的宿主入口**放回同一套假 ctx 里跑一遍（不只对导出名做断言），并用带钩子状态的渲染器真的点一次 chip 的预设行、点一次删除再确认，断言选择写入与 DELETE 各发生一次。`test/soul-prompt-row.test.mjs` 另有两例固定两种快照语义：`append` 对同一 agent 只取一次（长对话的系统提示词必须字节稳定），`replace` 每次重读（一问一答没有前缀要保护）。**本插件不进 dsh 仓库的测试脚手架，也不改动它。**
 
 界面改版后又加了三类：**产物只向模块表要两个平台模块**（`react` 与 `@deepseek-ai/dsh-client-ui-primitives` 都必须以 `require("…")` 出现，而不是被内联——内联会捎上 `react-dom`，而加载器遇到模块表答不上来的 specifier 会让整份用例失败）；**样式表按插件标记注入且只有一份**（用假 document 断言 `data-plugin`／`data-plugin-css` 与重复激活不插第二份，并断言表里带 chip 与列表行的规则）；**chip 交给共用菜单的正是切换列表**（断言 `side`／`portal`／`selectedId`／行文本与「空目录给一行说明而不是空菜单」，点行仍写入选择）。测试替身 `test/support/fake-ui-primitives.mjs` 把共用菜单按元素层渲染出来——录制版 React 不会调用嵌套函数组件，需要展开的地方由 `expand()` 显式调用。
 

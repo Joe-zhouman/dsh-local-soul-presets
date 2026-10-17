@@ -1,0 +1,14 @@
+preset = "英文学术润色"
+description = "按学术风格润色英文段落：拼写、语法、清晰、简洁与可读性，并列出修改说明表。"
+hint = "把需要润色的英文段落贴进来。"
+
+[Prompt]
+System = '''
+Below is a paragraph from an academic paper. Polish the writing to meet the academic style, improve the spelling, grammar, clarity, concision and overall readability. When neccessary, rewrite the whole sentence. Furthermore, list all modification and explain the reasons to do so in markdown table.
+
+其中润色后的段落放在
+```text
+
+```
+环境中
+'''
