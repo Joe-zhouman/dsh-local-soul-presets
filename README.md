@@ -106,9 +106,9 @@ Assistant = '''
 
 ## 切换与它写在哪里
 
-切换写 `local-soul-presets` 条目配置的 `active`（空串表示未选），落盘位置是 profile 补丁文件。这条路径走的是设置表单的 RPC，**在 `/api` 的浏览器信任围栏之内**，所以"切换"本身不新增未鉴权的写入面；Loader 把新值提交进运行中的配置引用并发 `loader/volatile-update`，插件的缓存随之刷新，不需要重挂载。
+选择是两层的：**会话覆盖 → 全局默认 → defaultPrompt**。composer 的 chip 走 `POST /plugins/soul-preset/select`（body 是 `{session, id}`；只带 `session` 或 `id` 为空即清除覆盖、回到跟随默认），把该会话的选择写进 `$DSH_HOME/soul-presets/.selections.json`——插入序对象，上限 500 条、最旧先掉；原地改选不挪位，先选的会话保资历，上限掉的是最旧的**选择**而不是最旧的重新确认。roster 读取时顺手清掉指向已不存在预设的行。设置页的表单写的是全局默认：`local-soul-presets` 条目配置的 `active`（空串表示未选），落盘位置是 profile 补丁文件，走设置表单的 RPC，**在 `/api` 的浏览器信任围栏之内**；Loader 把新值提交进运行中的配置引用并发 `loader/volatile-update`，插件的缓存随之刷新，不需要重挂载。`select` 在围栏之外，带与 roster 相同的回环 Host／Origin 守卫（见下节）。
 
-**切换是全局值，不是每会话各一份**：所有会话共享同一个 active。理由：组装发生在 Host，Host 必须知道用哪套；每会话存储要么新增会话事件类型、要么新增投影，代价大于收益。问答模式一次只问一类问题，共享一个 active 实际不冲突。
+裁决发生在 Host（`effective(sessionId)`）：会话覆盖指向可用预设就用它，覆盖悬空（预设已删或损坏）时降级到全局默认，**绝不落到「未选」**；`soul-prompt.mjs` 把 `agent.session.header.id` 递进服务按会话解析。roster 路由带 `?session=<id>` 时回显该会话的生效值并带 `overridden` 标记（区分「自己选的」与「跟随默认」）。浏览器半区为此读两个视图：chip 与 dock 用带 session 参数、且记住最近一次会话的视图（会话无关的刷新不至于把 chip 突然换回默认视图），设置页用默认视图；动作失败写两个视图。有覆盖时切换菜单顶部多一行「跟随默认」；生效值来自默认时 chip 显示「默认 · 名字」、dock 显示「预设（默认）：名字」。会话 id 的 wire 校验是 `^session-[A-Za-z0-9-]{1,64}$`（真实形状 `session-<uuid>`，测试里是 `session-<n>`）。
 
 因为系统提示词是每次组装重读的（`soul-prompt.mjs` 的 `mode: replace` 语义），**切换与改文件都在下一轮提问生效，不需要重开会话，也不需要重启服务**。实测：新建一个 `.toml` 后直接读 roster 路由即可看到它，无需重启。
 
@@ -139,11 +139,12 @@ Assistant = '''
 - **无补丁的部署上优雅降级**：`registerSource` 对 trigger 字符不校验，`$` 源静默注册但永不触发（detect 不认识）；chip 不渲染；host 侧手势照常工作。
 - **桌面端（安装版 Electron）**：web 端补丁落在 L:\dsh 检出源码；桌面端运行时独立（app.asar 内逐包产物），需用字节级 asar 补丁复刻同样三处改动——工具与流程见部署机 `.local-deploy/desktop-asar-patch/` 与 `README-soul-presets.md`「桌面端同步」一节（夜间更新会覆盖，需重打）。
 
-## 三条路由与它们的守卫
+## 四条路由与它们的守卫
 
 | 路由 | 方法 | 作用 |
 |---|---|---|
-| `/plugins/soul-preset/roster` | GET | 返回预设列表（含 `name`／`description`／`hint`／坏预设原因）、`active` 与目录路径。代码里这份列表叫 `roster`，沿用仓库 `agent-presets` 的既有叫法，不是另一个概念 |
+| `/plugins/soul-preset/roster` | GET | 返回预设列表（含 `name`／`description`／`hint`／坏预设原因）、`active` 与目录路径；带 `?session=<id>` 时 `active` 回显该会话的生效值并附 `overridden` 标记。代码里这份列表叫 `roster`，沿用仓库 `agent-presets` 的既有叫法，不是另一个概念 |
+| `/plugins/soul-preset/select` | POST | 写一个会话的选择覆盖（body `{session, id}`），`id` 缺省或为空即清除、回到跟随默认；幂等，重复选择或为从未选过的会话清除都是成功 |
 | `/plugins/soul-preset/presets` | POST | 按固定模板创建 `<id>.toml`；id 已存在返回 409 |
 | `/plugins/soul-preset/presets` | DELETE | 删除指定 `<id>.toml`；不在则 404 |
 | `/plugins/soul-preset/reveal` | POST | 打开预设目录，或回显路径供复制 |
@@ -233,7 +234,7 @@ export PATH="/d/softwares/node-v24.21.0-win-x64:$PATH"
 pnpm test
 ```
 
-135 个用例，覆盖：拼装字节与尺寸上限、TOML 解析与坏预设分类、逐文件 mtime 快照（含原地改写）、settings schema 与校验、模板可反解、回环 Host／Origin 守卫（含点分四段的越界段）、三条路由的方法分派与拒绝路径（含删除时 ENOENT 与其他失败的区分）、roster 解码与名称／简介／hint 映射、客户端动作发出的真实请求与失败可见性、并发刷新只读一次、改动与在途刷新并发时会补读一次、动作成功但随后读取失败时读取失败仍可见、删除时 ENOENT 与 EPERM 的不同响应、订阅者抛错不会把共享 store 卡死、**`$` 手势**（词法命中与不命中、去重序、注入字节、冻结的消息对象、只扫用户来源、`expand` 开关与运行时切换、构建产物里的监听器与行内 `$id` 渲染）、**`$` 触发源**（源形状、pick 产物、候选行映射与坏预设跳过、击键查询交给平台排序、共享读取与动作失效、构建产物里的注册与过滤），以及**构建产物本身**——`test/build.test.mjs` 会先跑一次真实构建，再导入 `lib/index.js`、用模块表加载器执行 `lib/client.js`、驱动它自己的 `apply()` 注册三个界面，并用录制的 React 真正调用 dock 与设置页组件，断言失败提示确实被渲染出来（删掉那两个错误元素会让测试变红）。另有 `test/soul-prompt-row.test.mjs` 覆盖部署侧的 `soul-prompt.mjs`（开关、服务缺席与返回 null 的回退、append 模式、`interpolate: false`），以及 `test/reveal.test.mjs` 覆盖目录 opener 的平台与失败路径。`test/build.test.mjs` 还把**构建后的宿主入口**放回同一套假 ctx 里跑一遍（不只对导出名做断言），并用带钩子状态的渲染器真的点一次 chip 的预设行、点一次删除再确认，断言选择写入与 DELETE 各发生一次。`test/soul-prompt-row.test.mjs` 另有两例固定两种快照语义：`append` 对同一 agent 只取一次（长对话的系统提示词必须字节稳定），`replace` 每次重读（一问一答没有前缀要保护）。**本插件不进 dsh 仓库的测试脚手架，也不改动它。**
+135 个用例，覆盖：拼装字节与尺寸上限、TOML 解析与坏预设分类、逐文件 mtime 快照（含原地改写）、settings schema 与校验、模板可反解、回环 Host／Origin 守卫（含点分四段的越界段）、四条路由的方法分派与拒绝路径（含删除时 ENOENT 与其他失败的区分）、roster 解码与名称／简介／hint 映射、每会话选择（select 与重置路由、覆盖→默认→defaultPrompt 的裁决链、`.selections.json` 的持久化、500 条上限与陈旧行清理）、客户端动作发出的真实请求与失败可见性、并发刷新只读一次、改动与在途刷新并发时会补读一次、动作成功但随后读取失败时读取失败仍可见、删除时 ENOENT 与 EPERM 的不同响应、订阅者抛错不会把共享 store 卡死、**`$` 手势**（词法命中与不命中、去重序、注入字节、冻结的消息对象、只扫用户来源、`expand` 开关与运行时切换、构建产物里的监听器与行内 `$id` 渲染）、**`$` 触发源**（源形状、pick 产物、候选行映射与坏预设跳过、击键查询交给平台排序、共享读取与动作失效、构建产物里的注册与过滤），以及**构建产物本身**——`test/build.test.mjs` 会先跑一次真实构建，再导入 `lib/index.js`、用模块表加载器执行 `lib/client.js`、驱动它自己的 `apply()` 注册三个界面，并用录制的 React 真正调用 dock 与设置页组件，断言失败提示确实被渲染出来（删掉那两个错误元素会让测试变红）。另有 `test/soul-prompt-row.test.mjs` 覆盖部署侧的 `soul-prompt.mjs`（开关、服务缺席与返回 null 的回退、append 模式、`interpolate: false`），以及 `test/reveal.test.mjs` 覆盖目录 opener 的平台与失败路径。`test/build.test.mjs` 还把**构建后的宿主入口**放回同一套假 ctx 里跑一遍（不只对导出名做断言），并用带钩子状态的渲染器真的点一次 chip 的预设行、点一次删除再确认，断言选择写入与 DELETE 各发生一次。`test/soul-prompt-row.test.mjs` 另有两例固定两种快照语义：`append` 对同一 agent 只取一次（长对话的系统提示词必须字节稳定），`replace` 每次重读（一问一答没有前缀要保护）。**本插件不进 dsh 仓库的测试脚手架，也不改动它。**
 
 界面改版后又加了三类：**产物只向模块表要两个平台模块**（`react` 与 `@deepseek-ai/dsh-client-ui-primitives` 都必须以 `require("…")` 出现，而不是被内联——内联会捎上 `react-dom`，而加载器遇到模块表答不上来的 specifier 会让整份用例失败）；**样式表按插件标记注入且只有一份**（用假 document 断言 `data-plugin`／`data-plugin-css` 与重复激活不插第二份，并断言表里带 chip 与列表行的规则）；**chip 交给共用菜单的正是切换列表**（断言 `side`／`portal`／`selectedId`／行文本与「空目录给一行说明而不是空菜单」，点行仍写入选择）。测试替身 `test/support/fake-ui-primitives.mjs` 把共用菜单按元素层渲染出来——录制版 React 不会调用嵌套函数组件，需要展开的地方由 `expand()` 显式调用。
 

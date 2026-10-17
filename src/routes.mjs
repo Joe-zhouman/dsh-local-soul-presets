@@ -1,5 +1,5 @@
 /**
- * The plugin's three same-origin routes. Handlers are built from injected
+ * The plugin's four same-origin routes. Handlers are built from injected
  * dependencies so tests drive them without a socket, and every one of them runs
  * the loopback guard first.
  *

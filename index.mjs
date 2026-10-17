@@ -1,11 +1,13 @@
 /**
  * Host half of the local soul-presets bundle.
  *
- * It owns five things and nothing else: the preset directory as a synchronous
- * snapshot (`soulPresets`), the `active` Config field holding which preset is
- * in force, the same-origin routes that create, delete, and reveal preset
- * files, the service the preset-scoped prompt row reads, and the `$id` gesture
- * listener that expands named presets in any mode's composer.
+ * It owns six things and nothing else: the preset directory as a synchronous
+ * snapshot (`soulPresets`), the `active` Config field holding the global
+ * default, the per-session selection store (`.selections.json`), the
+ * same-origin routes that read the roster, write per-session selections, and
+ * create, delete, and reveal preset files, the service the preset-scoped
+ * prompt row reads, and the `$id` gesture listener that expands named presets
+ * in any mode's composer.
  *
  * The active id is cached in a plain variable rather than read from the Config
  * reference on demand because the prompt row's text provider is a SYNCHRONOUS

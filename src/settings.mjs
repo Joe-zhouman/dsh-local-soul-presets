@@ -1,12 +1,12 @@
 /**
- * The `soul-preset` plugin configuration: which preset the deployment
- * currently runs.
+ * The `soul-preset` plugin configuration: the deployment's global default
+ * preset. Per-session overrides live in the selection store, not here.
  *
- * The selection is this plugin entry's Config rather than a settings
+ * The default is this plugin entry's Config rather than a settings
  * namespace. `active` is volatile, so the settings form projects it, the
- * active profile's patch persists a switch, and Loader commits the new id into
- * the running reference without remounting the plugin — which is what lets the
- * preset row read the current selection at its next assembly.
+ * active profile's patch persists a change, and Loader commits the new id
+ * into the running reference without remounting the plugin — which is what
+ * lets the preset row read the current default at its next assembly.
  * @module dsh-local-soul-presets/src/settings
  */
 import z from '@deepseek-ai/schemastery'
