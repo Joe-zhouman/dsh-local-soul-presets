@@ -12,6 +12,7 @@
 import { unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isTrustedLocalRequest } from './guard.mjs'
+import { modelLabel } from './models.mjs'
 import { PRESET_ID } from './presets.mjs'
 import { SESSION_ID } from './selection.mjs'
 import { presetTemplate } from './template.mjs'
@@ -127,12 +128,12 @@ function sessionParam(url) {
 /**
  * Build the route table.
  * @param deps - root directory, preset store, per-session selection store,
- * global-default reader, effective-selection resolver, reveal action, logger,
- * and (for tests) the unlink implementation.
+ * global-default reader, effective-selection resolver, preset-model applier,
+ * reveal action, logger, and (for tests) the unlink implementation.
  * @returns route entries carrying an `id` for tests plus the webserver's fields.
  */
 export function createRoutes(deps) {
-  const { root, store, active, selection, effective, reveal, log, unlink = unlinkSync, write = writeFileSync } = deps
+  const { root, store, active, selection, effective, applyModel, reveal, log, unlink = unlinkSync, write = writeFileSync } = deps
 
   const guarded = handler => async (req, res) => {
     if (!isTrustedLocalRequest(req.headers)) {
@@ -175,7 +176,29 @@ export function createRoutes(deps) {
         // Shape-valid and idempotent by construction: a repeated selection, or
         // a reset for a session that never chose, is the same success.
         selection.set(request.session, request.id)
-        send(res, 200, { active: effective(request.session), overridden: selection.has(request.session) })
+        const target = effective(request.session)
+        // A preset that names a model re-routes the session now. The preset
+        // switch itself already succeeded, so an unusable route is reported
+        // beside the success instead of turning it into a failure: the prompt
+        // is in force either way.
+        let model
+        let modelError
+        const spec = store.model(target)
+        if (spec !== undefined) {
+          try {
+            const outcome = await applyModel(request.session, spec)
+            if (outcome.selection !== undefined) model = outcome.selection
+          } catch (error) {
+            modelError = messageOf(error)
+            log(`soul-presets: preset "${String(target)}" model ${modelLabel(spec)} is unusable: ${modelError}`)
+          }
+        }
+        send(res, 200, {
+          active: target,
+          overridden: selection.has(request.session),
+          ...model === undefined ? {} : { model },
+          ...modelError === undefined ? {} : { modelError },
+        })
       }),
     },
     {

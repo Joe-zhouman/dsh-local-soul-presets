@@ -8,7 +8,7 @@ import { createPresetStore } from '../src/presets.mjs'
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'soul-presets-'))
   writeFileSync(join(root, 'translate.toml'), 'preset = "翻译"\n[Prompt]\nSystem = "T"\n')
-  writeFileSync(join(root, 'review.toml'), 'preset = "审阅"\ndescription = "读代码"\nhint = "贴代码"\n[Prompt]\nSystem = "R"\n')
+  writeFileSync(join(root, 'review.toml'), 'preset = "审阅"\ndescription = "读代码"\nhint = "贴代码"\n[Model]\nprovider = "p"\nmodel = "m"\n[Prompt]\nSystem = "R"\n')
   writeFileSync(join(root, 'broken.toml'), 'preset = \n')
   return root
 }
@@ -20,6 +20,18 @@ test('列出目录里的预设，坏预设带原因留在列表里', () => {
   assert.deepEqual(presets.map(p => p.id), ['broken', 'review', 'translate'])
   assert.equal(presets.find(p => p.id === 'broken').broken.length > 0, true)
   assert.equal(presets.find(p => p.id === 'review').description, '读代码')
+  rmSync(root, { recursive: true, force: true })
+})
+
+test('[Model] 跟着行一起进 roster，store.model 取到同一份', () => {
+  const root = fixture()
+  const store = createPresetStore(root)
+  const row = store.roster(null).presets.find(candidate => candidate.id === 'review')
+  assert.deepEqual(row.model, { provider: 'p', model: 'm' })
+  assert.deepEqual(store.model('review'), { provider: 'p', model: 'm' })
+  assert.equal(store.model('translate'), undefined, '没写 Model 的预设没有这一项')
+  assert.equal(store.model('broken'), undefined, '坏预设不提供模型')
+  assert.equal(store.model(null), undefined)
   rmSync(root, { recursive: true, force: true })
 })
 

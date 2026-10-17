@@ -1,12 +1,13 @@
 /**
  * Host half of the local soul-presets bundle.
  *
- * It owns five things and nothing else: the preset directory as a synchronous
+ * It owns six things and nothing else: the preset directory as a synchronous
  * snapshot (`soulPresets`), the `active` Config field holding the global
  * default, the per-session selection store (`.selections.json`), the
  * same-origin routes that read the roster, write per-session selections, and
- * create, delete, and reveal preset files, and the service the preset-scoped
- * prompt row reads.
+ * create, delete, and reveal preset files, the service the preset-scoped
+ * prompt row reads, and the preset default model a session adopts when it
+ * starts or when its preset is switched.
  *
  * The active id is cached in a plain variable rather than read from the Config
  * reference on demand because the prompt row's text provider is a SYNCHRONOUS
@@ -19,11 +20,12 @@
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { createModelApplier, isFreshSession, modelLabel } from './src/models.mjs'
 import { createPresetStore } from './src/presets.mjs'
 import { PRESET_ID } from './src/presets.mjs'
 import { revealDirectory } from './src/reveal.mjs'
 import { createRoutes } from './src/routes.mjs'
-import { createSelectionStore } from './src/selection.mjs'
+import { createSelectionStore, SESSION_ID } from './src/selection.mjs'
 import { SoulPresetSettings } from './src/settings.mjs'
 
 /** Bundle id, as the profile's cordis patch row names it. */
@@ -32,8 +34,13 @@ export const name = 'dsh-local-soul-presets'
 /** The active-preset selection, projected into the settings form for this entry. */
 export const Config = SoulPresetSettings
 
-/** Services this Host half needs before it applies. */
-export const inject = ['webServer']
+/**
+ * Services this Host half needs before it applies. The model-default half needs
+ * the Agent runtime (to find the live session), the Session Controller (its
+ * session-local selection entry point), the LLM registry (route validation),
+ * and the projection registry (whether a session has a model history yet).
+ */
+export const inject = ['webServer', 'agents', 'llm', 'sessionController', 'sessionProjections']
 
 /**
  * Resolve the preset directory.
@@ -79,6 +86,40 @@ export function apply(ctx, config) {
     return override !== undefined && store.has(override) ? override : active
   }
 
+  const models = createModelApplier({
+    agents: ctx.agents,
+    controller: ctx.sessionController,
+    llm: ctx.llm,
+    projections: ctx.sessionProjections,
+    log,
+  })
+
+  // A session that starts with no model history adopts its preset's `[Model]`
+  // before its first request. Only creation is hooked: a preset file edited
+  // later, or the global default moved later, never re-routes a conversation
+  // that is already running — the same rule that governs the prompt text.
+  // Subagent children are excluded by their identity shape: they are created
+  // with a bare UUID and own their model policy elsewhere.
+  ctx.on('agent/created', async ({ agent }) => {
+    const sessionId = agent.session.header.id
+    if (!SESSION_ID.test(sessionId)) return
+    if (!isFreshSession(ctx.sessionProjections, agent.session)) return
+    const id = effective(sessionId)
+    const spec = store.model(id)
+    if (spec === undefined) return
+    try {
+      const outcome = await models.apply(sessionId, spec, { force: true })
+      if (outcome.status !== 'applied') {
+        log(`soul-presets: preset "${String(id)}" model ${modelLabel(spec)} was not applied (${outcome.status})`)
+      }
+    } catch (error) {
+      // A preset naming an unroutable model must not take session creation
+      // down with it: the session stays on the deployment default and the log
+      // names the bad route.
+      log(`soul-presets: preset "${String(id)}" model ${modelLabel(spec)} is unusable: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
+
   ctx.provide('soulPresets', {
     /**
      * The roster, resolved for one session when asked: its `active` echo is the
@@ -114,6 +155,7 @@ export function apply(ctx, config) {
     active: () => active,
     selection,
     effective,
+    applyModel: (sessionId, spec) => models.apply(sessionId, spec),
     reveal: revealDirectory,
     log,
   })) {

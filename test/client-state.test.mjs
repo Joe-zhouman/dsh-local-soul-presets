@@ -37,9 +37,25 @@ test('畸形输入解码成空 roster 而不是抛错', () => {
   assert.deepEqual(decodeRoster({ presets: [null, 3, { noId: true }] }).presets, [])
 })
 
-test('名字回落到 id，缺失的简介与 hint 变空串', () => {
-  assert.deepEqual(presetLabels({ id: 'x' }), { name: 'x', description: '', hint: '' })
-  assert.deepEqual(presetLabels({ id: 'x', name: 'X', description: 'd', hint: 'h' }), { name: 'X', description: 'd', hint: 'h' })
+test('名字回落到 id，缺失的简介、hint 与模型变空串', () => {
+  assert.deepEqual(presetLabels({ id: 'x' }), { name: 'x', description: '', hint: '', model: '' })
+  assert.deepEqual(presetLabels({ id: 'x', name: 'X', description: 'd', hint: 'h' }), { name: 'X', description: 'd', hint: 'h', model: '' })
+})
+
+test('行上的 model 解出 provider/model，并拼成带 effort 的标签', () => {
+  const decoded = decodeRoster({
+    presets: [{
+      id: 'translate',
+      name: '翻译',
+      model: { provider: 'paratera', model: 'Luna', reasoningEffort: 'high' },
+    }],
+  })
+  assert.deepEqual(decoded.presets[0].model, { provider: 'paratera', model: 'Luna', reasoningEffort: 'high' })
+  assert.equal(presetLabels(decoded.presets[0]).model, 'paratera/Luna (high)')
+  const bare = decodeRoster({ presets: [{ id: 'x', model: { provider: 'p', model: 'm' } }] })
+  assert.equal(presetLabels(bare.presets[0]).model, 'p/m')
+  assert.equal(decodeRoster({ presets: [{ id: 'x', model: 'p/m' }] }).presets[0].model, undefined)
+  assert.equal(decodeRoster({ presets: [{ id: 'x', model: { provider: 'p' } }] }).presets[0].model, undefined)
 })
 
 test('悬空 active 被识别为失效，界面据此提示重选', () => {

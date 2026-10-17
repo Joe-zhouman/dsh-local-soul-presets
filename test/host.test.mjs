@@ -102,3 +102,106 @@ test('roster(session) 回显生效选择与覆盖标记，roster() 是默认视�
   })
 })
 
+/** A preset whose `[Model]` table names a full route. */
+const MODEL_PRESET = 'preset = "翻译"\n[Model]\nprovider = "paratera"\nmodel = "Luna"\nreasoningEffort = "high"\n[Prompt]\nSystem = "T"\n'
+
+/**
+ * A Session-shaped double: the applier only asks it for a logged request
+ * header, and the projection double answers the rest.
+ * @param id - the session id.
+ * @param header - the folded request header, when the session already ran.
+ * @returns the session double.
+ */
+function sessionDouble(id, header = undefined) {
+  return { header: { id }, requestHeader: () => header }
+}
+
+/**
+ * A Host context wired for the model-default path: one live Agent, a recording
+ * Session Controller, and a projection registry whose selection state the test
+ * supplies.
+ * @param options - the session id, its logged header, the selection state, the
+ * LLM double, and the global default.
+ * @returns the fake Host plus what the applier installed.
+ */
+function modelHost({ id = 'session-a', header, state = { lastUsed: null, pending: null }, resolve, active = 'translate', session = undefined } = {}) {
+  const installed = []
+  const target = session ?? sessionDouble(id, header)
+  const agent = { id, session: target }
+  const host = fakeCtx({
+    settings: { active },
+    agents: { get: candidate => (candidate === id ? agent : undefined) },
+    llm: { resolveCallConfig: resolve ?? (async config => config) },
+    sessionController: {
+      agents: { selectForNextRequest: (agentTarget, selection) => { installed.push({ agent: agentTarget, selection }) } },
+    },
+    sessionProjections: { stateOf: () => state },
+  })
+  return { ...host, agent, installed }
+}
+
+test('新会话创建时采用生效预设的 [Model]，并装成这个会话自己的选择', async () => {
+  await withPresetRoot(async root => {
+    writeFileSync(join(root, 'translate.toml'), MODEL_PRESET)
+    const host = modelHost({
+      resolve: async config => ({ ...config, reasoningEffort: 'high' }),
+    })
+    apply(host.ctx, host.config)
+    await host.ctx.__emit('agent/created', { agent: host.agent, source: 'startup' })
+    assert.deepEqual(host.installed, [{
+      agent: host.agent,
+      selection: { provider: 'paratera', model: 'Luna', reasoningEffort: 'high' },
+    }])
+    assert.deepEqual(host.warnings, [])
+  })
+})
+
+test('已有请求头或已选过模型的会话不动——新窗口加载不重写跑过的对话', async () => {
+  await withPresetRoot(async root => {
+    writeFileSync(join(root, 'translate.toml'), MODEL_PRESET)
+    const ran = modelHost({ header: { config: { provider: 'p', model: 'm' } } })
+    apply(ran.ctx, ran.config)
+    await ran.ctx.__emit('agent/created', { agent: ran.agent, source: 'resume' })
+    assert.deepEqual(ran.installed, [])
+
+    const picked = modelHost({ state: { lastUsed: null, pending: { provider: 'x', model: 'y' } } })
+    apply(picked.ctx, picked.config)
+    await picked.ctx.__emit('agent/created', { agent: picked.agent, source: 'startup' })
+    assert.deepEqual(picked.installed, [])
+  })
+})
+
+test('子代理会话（裸 UUID）不继承预设模型', async () => {
+  await withPresetRoot(async root => {
+    writeFileSync(join(root, 'translate.toml'), MODEL_PRESET)
+    const host = modelHost({ id: '3f7c2a1e-8b4d-4c6e-9a10-2b3c4d5e6f70' })
+    apply(host.ctx, host.config)
+    await host.ctx.__emit('agent/created', { agent: host.agent, source: 'startup' })
+    assert.deepEqual(host.installed, [])
+  })
+})
+
+test('预设没写 [Model] 时什么都不装', async () => {
+  await withPresetRoot(async () => {
+    const host = modelHost()
+    apply(host.ctx, host.config)
+    await host.ctx.__emit('agent/created', { agent: host.agent, source: 'startup' })
+    assert.deepEqual(host.installed, [])
+    assert.deepEqual(host.warnings, [])
+  })
+})
+
+test('模型不可路由时新会话照常建立，只记一条警告', async () => {
+  await withPresetRoot(async root => {
+    writeFileSync(join(root, 'translate.toml'), MODEL_PRESET)
+    const host = modelHost({
+      resolve: async () => { throw new Error('provider "paratera" has no model "Luna"') },
+    })
+    apply(host.ctx, host.config)
+    await host.ctx.__emit('agent/created', { agent: host.agent, source: 'startup' })
+    assert.deepEqual(host.installed, [])
+    assert.equal(host.warnings.length, 1)
+    assert.match(host.warnings[0], /paratera\/Luna.*unusable.*no model/u)
+  })
+})
+

@@ -7,7 +7,7 @@
 | 项 | 值 |
 |---|---|
 | 包名 | `dsh-local-soul-presets` |
-| 版本 | `0.1.5`（`private`，不发布） |
+| 版本 | `0.1.6`（`private`，不发布） |
 | 部署机工作副本 | `L:\dsh\.local-deploy\soul-presets-plugin\`（即本仓库的检出） |
 | 类型 | host + client bundle（`dsh.client.platform: web`，自带 `dsh.bundle.patch`） |
 | 安装 spec | `file:L:/dsh/.local-deploy/soul-presets-plugin` |
@@ -47,6 +47,11 @@ preset = "翻译助手"
 description = "中英互译，保留术语、格式与代码块，不解释、不寒暄。"
 hint = "把要翻译的段落贴进来；需要指定方向时在开头写「译成英文」或「译成中文」。"
 
+[Model]
+provider = "paratera"
+model = "AZ-GPT-5.6-Luna"
+reasoningEffort = "high"
+
 [Prompt]
 System = '''
 你是翻译引擎……
@@ -66,11 +71,14 @@ Assistant = '''
 | `preset` | 是 | 显示名。缺它或不是非空字符串即坏预设。 |
 | `description` | 否 | 切换列表里的一句话简介。**只进界面**。 |
 | `hint` | 否 | 给用户的一句"该问什么"。**只进界面**。 |
+| `[Model] provider` | 与 `model` 成对 | 注册的 provider 路由。出现 `[Model]` 表时必填。 |
+| `[Model] model` | 与 `provider` 成对 | provider 下的模型 id。 |
+| `[Model] reasoningEffort` | 否 | 推理强度；不写则跟随模型／provider 的默认。 |
 | `[Prompt] System` | 三选一 | 系统提示词。 |
 | `[Prompt] User` | 三选一 | 示例块的用户半边。 |
 | `[Prompt] Assistant` | 三选一 | 示例块的助手半边。 |
 
-`System`／`User`／`Assistant` 至少要有一项非空，否则该文件是坏预设。
+`System`／`User`／`Assistant` 至少要有一项非空，否则该文件是坏预设。`[Model]` 可以整张表不写；写了就必须同时给 `provider` 与 `model`（只写一半是坏预设），否则它什么都不做。`[Model]` 的生效时机见下文「默认模型」。
 
 **提示词一律用 `'''` 多行字面量。** TOML 的字面量不做任何转义处理，所以提示词里写引号、花括号、JSON、`{{` 都不需要转义，也不会与文件语法相撞——这正是选 TOML 而不是 YAML／JSON 的原因。
 
@@ -108,6 +116,26 @@ Assistant = '''
 
 因为系统提示词是每次组装重读的（`soul-prompt.mjs` 的 `mode: replace` 语义），**切换与改文件都在下一轮提问生效，不需要重开会话，也不需要重启服务**。实测：新建一个 `.toml` 后直接读 roster 路由即可看到它，无需重启。
 
+## 默认模型（0.1.6）
+
+`[Model]` 给预设带一个默认模型。它只在两个时点生效，与提示词「改了下一轮就变」的规则刻意不同：
+
+| 时点 | 行为 |
+|---|---|
+| 新会话建立（新窗口、新对话、首次发消息前的空白会话被恢复） | 会话日志里还没有 `request/header`、也没有任何 `model/selection` 时，装上该预设的模型；这一条会作为会话自己的选择写进日志（`model/selection`），composer 的模型选择器随即显示它 |
+| 在会话里切换预设（chip 选一行，或「跟随默认」） | 立刻把该会话切到目标预设的模型；目标预设没写 `[Model]` 时保持当前模型不动 |
+
+以下情况**不**生效：编辑预设文件、改设置页的全局默认、重开一个已经跑过的会话。已经在跑的会话不会被文件改动或默认变化重新路由——「只在新窗口加载或者切换预设时生效」就是这条边界。恢复一个曾经发过消息的会话时，它的模型来自日志里的 `request/header`，与预设无关。
+
+它**不写部署默认模型**。dsh 自己的模型选择器（`session.selectModel`）会把选择同时存成 `agent-default-model`，而预设默认模型只用 Session Controller 的会话内入口（`selectForNextRequest`）——追加 `model/selection` 并移动该 Agent 的实时选择，效果与在选择器里点一下相同，除了不动 profile 里的默认值。这个入口是 Session Controller 的内部字段而不是公开服务方法；dsh 若改了实现，插件会在应用时记一条「preset model defaults are inert」并保持会话原模型，其余功能不受影响。
+
+两条失败语义：
+
+- 新会话：模型无法解析（provider／模型不存在、effort 不被支持）时**不阻止会话建立**，会话沿部署默认模型启动，日志里记一条带预设 id 与 `provider/model` 的警告。
+- 切换预设：预设本身照常切过去（提示词已经生效），`select` 路由在成功响应里附带 `modelError`；界面显示「预设已切换，但模型没有切换：原因」。
+
+同一路由重复施加不会追加事件：切换时若会话的目标选择已经是该 route（预设没指定 effort 时只看 provider/model），视为已生效。子代理会话（裸 UUID，不是 `session-` 形状）不参与本机制，它们有自己的模型策略。预设行上的 `[Model]` 会显示在切换列表和设置页的「模型：provider/model (effort)」一行。
+
 ## `$` 手势已移除（0.1.5）
 
 0.1.3 引入的 `$id` 手势（任意模式把预设注入当轮对话）与 0.1.4 的 `$` 触发菜单在 0.1.5 整体移除：实际使用频率不高，而完整体验依赖对 dsh 检出的四处未提交补丁（`ui-input-trigger` 的 `TriggerChar` 封闭联合、`ui-conversation` 镜像类型、`ui-primitives` 的 `projectUserText` token 识别、`ui-chat` 的气泡投影）与桌面端 app.asar 字节补丁，随版本更新的维护成本大于价值。预设回到唯一入口：问答模式的系统提示词（每会话覆盖或全局默认，见上节）。
@@ -118,8 +146,8 @@ Assistant = '''
 
 | 路由 | 方法 | 作用 |
 |---|---|---|
-| `/plugins/soul-preset/roster` | GET | 返回预设列表（含 `name`／`description`／`hint`／坏预设原因）、`active` 与目录路径；带 `?session=<id>` 时 `active` 回显该会话的生效值并附 `overridden` 标记。代码里这份列表叫 `roster`，沿用仓库 `agent-presets` 的既有叫法，不是另一个概念 |
-| `/plugins/soul-preset/select` | POST | 写一个会话的选择覆盖（body `{session, id}`），`id` 缺省或为空即清除、回到跟随默认；幂等，重复选择或为从未选过的会话清除都是成功 |
+| `/plugins/soul-preset/roster` | GET | 返回预设列表（含 `name`／`description`／`hint`／`model`／坏预设原因）、`active` 与目录路径；带 `?session=<id>` 时 `active` 回显该会话的生效值并附 `overridden` 标记。代码里这份列表叫 `roster`，沿用仓库 `agent-presets` 的既有叫法，不是另一个概念 |
+| `/plugins/soul-preset/select` | POST | 写一个会话的选择覆盖（body `{session, id}`），`id` 缺省或为空即清除、回到跟随默认；幂等，重复选择或为从未选过的会话清除都是成功。目标预设写了 `[Model]` 时顺带把该会话切到它的模型，成功响应因此可能带 `model` 或 `modelError`（见「默认模型」） |
 | `/plugins/soul-preset/presets` | POST | 按固定模板创建 `<id>.toml`；id 已存在返回 409 |
 | `/plugins/soul-preset/presets` | DELETE | 删除指定 `<id>.toml`；不在则 404 |
 | `/plugins/soul-preset/reveal` | POST | 打开预设目录，或回显路径供复制 |
@@ -199,7 +227,7 @@ pnpm dsh plugin --profile web add "file:L:/dsh/.local-deploy/soul-presets-plugin
 - **`lib/client.js` 从模块表取 `@deepseek-ai/dsh-client-ui-primitives`**（外壳自带的平台模块，不需要额外安装），`tsdown.config.mjs` 的 `MODULE_TABLE_KEYS` 因此多了一项；它必须保持 `require`，被内联就会带上 `react-dom` 并丢掉"与访问模式同一个菜单"这件事。
 - **样式表是一份注入的 `<style>`**（`src/client-styles.mjs`），不是 CSS module：本包的 tsdown 配置没有样式管线，而模块系统本来就认插件注入的标签——`data-plugin` 是移除键（`removeOwnedStyles`），`data-plugin-css` 是同一张表的去重键。类名带 `dsh-sp-` 前缀（它们活在页面的全局样式表里），值一律用 `--dsw-*` token，明暗主题都跟着走。设置页那一节也不再自带 `<h2>`：外壳用注册时的 `label` 渲染左侧导航项，原先那个标题是重复的。
 
-浏览器探针：chip 仍是 `[data-dsh-soul-preset-chip]`，行内文本是 `[data-dsh-soul-preset-name|description|hint]`；**`[data-dsh-soul-preset-menu]` 没有了**，列表 DOM 现在归共用菜单所有，打开时用 `[role="menu"]` 定位（同一时刻页面里只有它一个）。设置页新增 `[data-dsh-soul-preset-row-text|row-desc|select|actions|confirm|cancel|remove|new|reveal|reload|toolbar]`，`root`／`broken`／`error` 不变。
+浏览器探针：chip 仍是 `[data-dsh-soul-preset-chip]`，行内文本是 `[data-dsh-soul-preset-name|description|hint|model]`；**`[data-dsh-soul-preset-menu]` 没有了**，列表 DOM 现在归共用菜单所有，打开时用 `[role="menu"]` 定位（同一时刻页面里只有它一个）。设置页新增 `[data-dsh-soul-preset-row-text|row-desc|row-model|select|actions|confirm|cancel|remove|new|reveal|reload|toolbar]`，`root`／`broken`／`error` 不变。
 
 ## 测试
 
@@ -209,7 +237,7 @@ export PATH="/d/softwares/node-v24.21.0-win-x64:$PATH"
 pnpm test
 ```
 
-121 个用例，覆盖：拼装字节与尺寸上限、TOML 解析与坏预设分类、逐文件 mtime 快照（含原地改写）、settings schema 与校验、模板可反解、回环 Host／Origin 守卫（含点分四段的越界段）、四条路由的方法分派与拒绝路径（含删除时 ENOENT 与其他失败的区分）、roster 解码与名称／简介／hint 映射、每会话选择（select 与重置路由、覆盖→默认→defaultPrompt 的裁决链、`.selections.json` 的持久化、500 条上限与陈旧行清理）、客户端动作发出的真实请求与失败可见性、并发刷新只读一次、改动与在途刷新并发时会补读一次、动作成功但随后读取失败时读取失败仍可见、删除时 ENOENT 与 EPERM 的不同响应、订阅者抛错不会把共享 store 卡死，以及**构建产物本身**——`test/build.test.mjs` 会先跑一次真实构建，再导入 `lib/index.js`、用模块表加载器执行 `lib/client.js`、驱动它自己的 `apply()` 注册三个界面，并用录制的 React 真正调用 dock 与设置页组件，断言失败提示确实被渲染出来（删掉那两个错误元素会让测试变红）。另有 `test/soul-prompt-row.test.mjs` 覆盖部署侧的 `soul-prompt.mjs`（开关、服务缺席与返回 null 的回退、append 模式、`interpolate: false`），以及 `test/reveal.test.mjs` 覆盖目录 opener 的平台与失败路径。`test/build.test.mjs` 还把**构建后的宿主入口**放回同一套假 ctx 里跑一遍（不只对导出名做断言），并用带钩子状态的渲染器真的点一次 chip 的预设行、点一次删除再确认，断言选择写入与 DELETE 各发生一次。`test/soul-prompt-row.test.mjs` 另有两例固定两种快照语义：`append` 对同一 agent 只取一次（长对话的系统提示词必须字节稳定），`replace` 每次重读（一问一答没有前缀要保护）。**本插件不进 dsh 仓库的测试脚手架，也不改动它。**
+140 个用例，覆盖：拼装字节与尺寸上限、TOML 解析与坏预设分类（含 `[Model]` 的完整／半写／类型错误）、逐文件 mtime 快照（含原地改写）、settings schema 与校验、模板可反解、回环 Host／Origin 守卫（含点分四段的越界段）、四条路由的方法分派与拒绝路径（含删除时 ENOENT 与其他失败的区分）、roster 解码与名称／简介／hint／模型映射、每会话选择（select 与重置路由、覆盖→默认→defaultPrompt 的裁决链、`.selections.json` 的持久化、500 条上限与陈旧行清理）、默认模型（新会话仅在有模型历史前施加、已有请求头／已选模型时不动、子代理 id 形状排除、不可路由时新会话照常建立且切换仍成功、`modelError` 在界面可见）、客户端动作发出的真实请求与失败可见性、并发刷新只读一次、改动与在途刷新并发时会补读一次、动作成功但随后读取失败时读取失败仍可见、删除时 ENOENT 与 EPERM 的不同响应、订阅者抛错不会把共享 store 卡死，以及**构建产物本身**——`test/build.test.mjs` 会先跑一次真实构建，再导入 `lib/index.js`、用模块表加载器执行 `lib/client.js`、驱动它自己的 `apply()` 注册三个界面，并用录制的 React 真正调用 dock 与设置页组件，断言失败提示确实被渲染出来（删掉那两个错误元素会让测试变红）。另有 `test/soul-prompt-row.test.mjs` 覆盖部署侧的 `soul-prompt.mjs`（开关、服务缺席与返回 null 的回退、append 模式、`interpolate: false`），以及 `test/reveal.test.mjs` 覆盖目录 opener 的平台与失败路径。`test/build.test.mjs` 还把**构建后的宿主入口**放回同一套假 ctx 里跑一遍（不只对导出名做断言），并用带钩子状态的渲染器真的点一次 chip 的预设行、点一次删除再确认，断言选择写入与 DELETE 各发生一次。`test/soul-prompt-row.test.mjs` 另有两例固定两种快照语义：`append` 对同一 agent 只取一次（长对话的系统提示词必须字节稳定），`replace` 每次重读（一问一答没有前缀要保护）。**本插件不进 dsh 仓库的测试脚手架，也不改动它。**
 
 界面改版后又加了三类：**产物只向模块表要两个平台模块**（`react` 与 `@deepseek-ai/dsh-client-ui-primitives` 都必须以 `require("…")` 出现，而不是被内联——内联会捎上 `react-dom`，而加载器遇到模块表答不上来的 specifier 会让整份用例失败）；**样式表按插件标记注入且只有一份**（用假 document 断言 `data-plugin`／`data-plugin-css` 与重复激活不插第二份，并断言表里带 chip 与列表行的规则）；**chip 交给共用菜单的正是切换列表**（断言 `side`／`portal`／`selectedId`／行文本与「空目录给一行说明而不是空菜单」，点行仍写入选择）。测试替身 `test/support/fake-ui-primitives.mjs` 把共用菜单按元素层渲染出来——录制版 React 不会调用嵌套函数组件，需要展开的地方由 `expand()` 显式调用。
 

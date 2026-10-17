@@ -245,7 +245,7 @@ test('构建成功，且宿主产物导出插件面', async () => {
   assert.equal(run.status, 0, `build exited ${String(run.status)}\n${run.stdout ?? ''}${run.stderr ?? ''}`)
   const host = await import(pathToFileURL(join(root, 'lib/index.js')).href)
   assert.equal(host.name, 'dsh-local-soul-presets')
-  assert.deepEqual(host.inject, ['webServer'])
+  assert.deepEqual(host.inject, ['webServer', 'agents', 'llm', 'sessionController', 'sessionProjections'])
   assert.equal(typeof host.apply, 'function')
   assert.equal(typeof host.resolvePresetRoot, 'function')
 })

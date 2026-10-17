@@ -46,6 +46,34 @@ export function presetIdFromFile(fileName) {
 }
 
 /**
+ * Read the optional `[Model]` table: the model a session starts on when this
+ * preset takes effect. Both halves of a route are required together — a lone
+ * provider or model is always a typo, and accepting it would silently leave the
+ * session on whatever model it had.
+ * @param table - the parsed top-level table.
+ * @returns the model spec, or undefined when the preset names none.
+ * @throws {Error} when the table is present but malformed.
+ */
+function parseModel(table) {
+  const model = table['Model']
+  if (model === undefined) return undefined
+  if (typeof model !== 'object' || model === null || Array.isArray(model)) {
+    throw new Error('Model must be a table')
+  }
+  const provider = optionalString(model, 'provider')
+  const id = optionalString(model, 'model')
+  if (provider === undefined || id === undefined) {
+    throw new Error('Model must set both provider and model')
+  }
+  const reasoningEffort = optionalString(model, 'reasoningEffort')
+  return {
+    provider,
+    model: id,
+    ...reasoningEffort === undefined ? {} : { reasoningEffort },
+  }
+}
+
+/**
  * Parse one preset file.
  * @param id - the id taken from the file name.
  * @param source - the file's text.
@@ -58,6 +86,7 @@ export function parsePreset(id, source) {
     if (name === undefined) throw new Error('preset must name the preset (a non-empty string)')
     const description = optionalString(table, 'description')
     const hint = optionalString(table, 'hint')
+    const model = parseModel(table)
     const prompt = table['Prompt']
     if (prompt !== undefined && (typeof prompt !== 'object' || prompt === null || Array.isArray(prompt))) {
       throw new Error('Prompt must be a table')
@@ -77,6 +106,7 @@ export function parsePreset(id, source) {
       name,
       ...description === undefined ? {} : { description },
       ...hint === undefined ? {} : { hint },
+      ...model === undefined ? {} : { model },
       text,
     }
   } catch (error) {
@@ -194,10 +224,22 @@ export function createPresetStore(root) {
             name: preset.name,
             ...preset.description === undefined ? {} : { description: preset.description },
             ...preset.hint === undefined ? {} : { hint: preset.hint },
+            ...preset.model === undefined ? {} : { model: preset.model },
           }
           : { id: preset.id, broken: preset.broken }),
         active: active ?? null,
       }
+    },
+    /**
+     * The model spec one usable preset carries.
+     * @param id - a preset id, or null.
+     * @returns the spec, or undefined when the preset is absent, broken, or
+     * names no model.
+     */
+    model(id) {
+      if (id === null) return undefined
+      const preset = load().byId.get(id)
+      return preset === undefined || preset.broken !== undefined ? undefined : preset.model
     },
     /**
      * The composed prompt text for one session directory.

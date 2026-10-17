@@ -241,6 +241,7 @@ export const CSS_TEXT = `
 }
 
 [data-dsh-soul-preset-row-desc],
+[data-dsh-soul-preset-row-model],
 [data-dsh-soul-preset-broken] {
   font-size: 12px;
   line-height: 18px;

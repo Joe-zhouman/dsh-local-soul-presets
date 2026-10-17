@@ -6,10 +6,11 @@ import { test } from 'node:test'
 import { createPresetStore } from '../src/presets.mjs'
 import { createRoutes } from '../src/routes.mjs'
 
-function harness({ host = '127.0.0.1:3080', origin, unlink, write } = {}) {
+function harness({ host = '127.0.0.1:3080', origin, unlink, write, presetToml, applyModel } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'soul-routes-'))
-  writeFileSync(join(root, 'translate.toml'), 'preset = "翻译"\n[Prompt]\nSystem = "T"\n')
+  writeFileSync(join(root, 'translate.toml'), presetToml ?? 'preset = "翻译"\n[Prompt]\nSystem = "T"\n')
   const logged = []
+  const applied = []
   const store = createPresetStore(root)
   // The per-session override map the select route writes and the roster echoes.
   const overrides = new Map()
@@ -33,6 +34,10 @@ function harness({ host = '127.0.0.1:3080', origin, unlink, write } = {}) {
     active,
     selection,
     effective,
+    applyModel: applyModel ?? (async (sessionId, spec) => {
+      applied.push({ sessionId, spec })
+      return { status: 'applied', selection: { provider: spec.provider, model: spec.model } }
+    }),
     reveal: async () => ({ opened: false, path: root }),
     log: message => { logged.push(message) },
     ...unlink === undefined ? {} : { unlink },
@@ -56,7 +61,7 @@ function harness({ host = '127.0.0.1:3080', origin, unlink, write } = {}) {
     await route.handler(req, res)
     return res
   }
-  return { root, routes, call, logged, overrides, cleanup: () => rmSync(root, { recursive: true, force: true }) }
+  return { root, routes, call, logged, overrides, applied, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }
 
 test('四条路由的 (kind,path) 互不重复——重复会在 webServer 注册时抛错并杀掉 host', () => {
@@ -111,6 +116,39 @@ test('select 写入会话覆盖并回显生效值，重置后回落默认', asyn
   assert.equal(reset.statusCode, 200)
   assert.equal(JSON.parse(reset.body).overridden, false)
   assert.equal(h.overrides.has('session-a'), false)
+  h.cleanup()
+})
+
+test('select 在预设带 [Model] 时把模型装到该会话，重置（跟随默认）也装默认预设的模型', async () => {
+  const h = harness({ presetToml: 'preset = "翻译"\n[Model]\nprovider = "p"\nmodel = "m"\n[Prompt]\nSystem = "T"\n' })
+  const set = await h.call('select', { method: 'POST', body: JSON.stringify({ session: 'session-a', id: 'translate' }) })
+  assert.equal(set.statusCode, 200)
+  assert.deepEqual(JSON.parse(set.body), {
+    active: 'translate',
+    overridden: true,
+    model: { provider: 'p', model: 'm' },
+  })
+  assert.deepEqual(h.applied, [{ sessionId: 'session-a', spec: { provider: 'p', model: 'm' } }])
+  const reset = await h.call('select', { method: 'POST', body: JSON.stringify({ session: 'session-a' }) })
+  assert.equal(JSON.parse(reset.body).model.provider, 'p', '跟随默认也是切到默认预设，装它的模型')
+  assert.equal(h.applied.length, 2)
+  h.cleanup()
+})
+
+test('模型不可路由时预设切换仍然成功，原因放在响应里并记日志', async () => {
+  const h = harness({
+    presetToml: 'preset = "翻译"\n[Model]\nprovider = "p"\nmodel = "gone"\n[Prompt]\nSystem = "T"\n',
+    applyModel: async () => { throw new Error('provider "p" has no model "gone"') },
+  })
+  const res = await h.call('select', { method: 'POST', body: JSON.stringify({ session: 'session-a', id: 'translate' }) })
+  assert.equal(res.statusCode, 200, '提示词已经切过去了，不能把整次切换报成失败')
+  const payload = JSON.parse(res.body)
+  assert.equal(payload.active, 'translate')
+  assert.equal(payload.overridden, true)
+  assert.match(payload.modelError, /no model "gone"/u)
+  assert.equal(payload.model, undefined)
+  assert.equal(h.logged.length, 1)
+  assert.match(h.logged[0], /p\/gone.*unusable/u)
   h.cleanup()
 })
 

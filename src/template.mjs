@@ -15,6 +15,13 @@ export function presetTemplate(id) {
 description = "一句话说明这套预设是做什么的"
 hint = "给用户的提示：这套预设该问什么"
 
+# 可选：这套预设的默认模型。新会话启动、或会话切到本预设时生效；
+# 改这里不会动已经在跑的会话。去掉注释即启用，provider 与 model 必须同时写。
+# [Model]
+# provider = "paratera"
+# model = "AZ-GPT-5.6-Luna"
+# reasoningEffort = "high"
+
 [Prompt]
 System = '''
 你是……

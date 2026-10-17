@@ -36,11 +36,20 @@ export function decodeRoster(payload) {
   const rows = Array.isArray(source.presets) ? source.presets : []
   const presets = rows.flatMap(row => {
     if (row === null || typeof row !== 'object' || typeof row.id !== 'string') return []
+    const model = row.model !== null && typeof row.model === 'object'
+      && typeof row.model.provider === 'string' && typeof row.model.model === 'string'
+      ? {
+        provider: row.model.provider,
+        model: row.model.model,
+        ...typeof row.model.reasoningEffort === 'string' ? { reasoningEffort: row.model.reasoningEffort } : {},
+      }
+      : undefined
     return [{
       id: row.id,
       ...typeof row.name === 'string' ? { name: row.name } : {},
       ...typeof row.description === 'string' ? { description: row.description } : {},
       ...typeof row.hint === 'string' ? { hint: row.hint } : {},
+      ...model === undefined ? {} : { model },
       ...typeof row.broken === 'string' ? { broken: row.broken } : {},
     }]
   })
@@ -53,15 +62,21 @@ export function decodeRoster(payload) {
 }
 
 /**
- * The three strings one row contributes to the UI.
+ * The four strings one row contributes to the UI.
  * @param row - one roster row.
- * @returns the display name (falling back to the id), description, and hint.
+ * @returns the display name (falling back to the id), description, hint, and
+ * the `provider/model[ (effort)]` label of the row's default model (empty when
+ * it names none).
  */
 export function presetLabels(row) {
+  const spec = row.model
   return {
     name: typeof row.name === 'string' && row.name !== '' ? row.name : row.id,
     description: typeof row.description === 'string' ? row.description : '',
     hint: typeof row.hint === 'string' ? row.hint : '',
+    model: spec === undefined
+      ? ''
+      : `${spec.provider}/${spec.model}${spec.reasoningEffort === undefined ? '' : ` (${spec.reasoningEffort})`}`,
   }
 }
 

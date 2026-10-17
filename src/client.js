@@ -80,6 +80,9 @@ function presetRowLabel(t, row) {
       labels.hint === '' ? null : React.createElement('span', {
         key: 'hint', className: 'dsh-sp-row-part', 'data-dsh-soul-preset-hint': '',
       }, labels.hint),
+      labels.model === '' ? null : React.createElement('span', {
+        key: 'model', className: 'dsh-sp-row-part', 'data-dsh-soul-preset-model': '',
+      }, `${t('modelPrefix')} ${labels.model}`),
     ].filter(part => part !== null)
     : [React.createElement('span', {
       key: 'broken', className: 'dsh-sp-row-part dsh-sp-row-broken', 'data-dsh-soul-preset-broken': '',
@@ -238,6 +241,9 @@ function ManagementSection(props) {
         labels.description === ''
           ? null
           : React.createElement('span', { 'data-dsh-soul-preset-row-desc': '' }, labels.description),
+        labels.model === ''
+          ? null
+          : React.createElement('span', { 'data-dsh-soul-preset-row-model': '' }, `${t('modelPrefix')}：${labels.model}`),
         row.broken === undefined
           ? null
           : React.createElement('span', { 'data-dsh-soul-preset-broken': '' }, `${t('brokenPrefix')}：${row.broken}`),

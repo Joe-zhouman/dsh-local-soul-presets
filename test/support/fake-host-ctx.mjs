@@ -15,18 +15,30 @@ import { join } from 'node:path'
  * behave like cordis, `webServer.register` refuses a duplicate route the way the
  * real one does, and `loader/volatile-update` reaches the listener the plugin
  * registered.
- * @param options - the values the Config reference starts from.
+ *
+ * The Agent runtime, LLM registry, Session Controller, and projection registry
+ * are plain injected doubles: absent ones default to a context where no session
+ * is live and no model history exists.
+ * @param options - the values the Config reference starts from, plus replacements
+ * for the Host services the plugin reads.
  * @returns the context, the Config argument, and the recorded routes, effects,
- * and listeners.
+ * listeners, and warnings.
  */
-export function fakeCtx({ settings = {} } = {}) {
+export function fakeCtx({
+  settings = {},
+  agents = { get: () => undefined },
+  llm = { resolveCallConfig: async config => config },
+  sessionController = {},
+  sessionProjections = { stateOf: () => undefined },
+} = {}) {
   const services = new Map()
   const routes = []
   const effects = []
   const listeners = new Map()
+  const warnings = []
   let current = { active: '', ...settings }
   const ctx = {
-    logger: { info() {}, warn() {} },
+    logger: { info() {}, warn(message) { warnings.push(message) } },
     webServer: {
       register: route => {
         const key = `${route.kind} ${route.path}`
@@ -37,10 +49,14 @@ export function fakeCtx({ settings = {} } = {}) {
         return () => {}
       },
     },
+    agents,
+    llm,
+    sessionController,
+    sessionProjections,
     provide: (name, value) => { services.set(name, value); return () => { services.delete(name) } },
     get: name => services.get(name),
     effect: factory => { effects.push(factory()) },
-    on: (event, handler) => { listeners.set(event, handler); return () => {} },
+    on: (event, handler) => { listeners.set(event, handler); return () => { listeners.delete(event) } },
   }
   // Loader commits the new values before it announces the update, so the
   // references move first and the listener follows.
@@ -48,12 +64,14 @@ export function fakeCtx({ settings = {} } = {}) {
     current = { ...current, ...next }
     listeners.get('loader/volatile-update')?.()
   }
+  ctx.__emit = (event, payload) => listeners.get(event)?.(payload)
   return {
     ctx,
     config: { active: { get: () => current.active } },
     routes,
     effects,
     listeners,
+    warnings,
   }
 }
 
@@ -79,7 +97,7 @@ export async function withPresetRoot(run) {
   const previous = process.env.DSH_HOME
   process.env.DSH_HOME = home
   try {
-    return await run()
+    return await run(root)
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous

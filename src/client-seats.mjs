@@ -33,6 +33,8 @@ export const ZH = {
   followDefault: '跟随默认',
   stale: '当前选择指向的预设已不存在或已损坏，请重新选择。',
   brokenPrefix: '不可用',
+  modelPrefix: '模型',
+  modelFailed: '预设已切换，但模型没有切换',
   newPreset: '新建',
   newPrompt: '新预设的 id（小写字母、数字、连字符）',
   remove: '删除',
@@ -206,7 +208,7 @@ export function createSeats(ctx) {
    * @param method - the HTTP method.
    * @param path - the route path.
    * @param body - the JSON body, when the method carries one.
-   * @returns once the response was accepted.
+   * @returns the accepted response's parsed JSON, or null when it carried none.
    */
   const request = async (method, path, body) => {
     const response = await fetch(path, {
@@ -221,6 +223,17 @@ export function createSeats(ctx) {
       const detail = await response.json().catch(() => null)
       throw new Error(detail?.error ?? `request failed with ${String(response.status)}`)
     }
+    return response.json().catch(() => null)
+  }
+
+  /**
+   * Surface a switch whose model half failed. The preset itself is already in
+   * force, so this is a warning about the route rather than a failed action.
+   * @param payload - the select route's parsed response.
+   */
+  const reportModelFailure = payload => {
+    if (payload === null || typeof payload !== 'object' || typeof payload.modelError !== 'string') return
+    roster.reportFailure(`${ZH.modelFailed}：${payload.modelError}`)
   }
 
   // User actions report into both readers instead of rejecting: the UI fires
@@ -253,9 +266,13 @@ export function createSeats(ctx) {
 
   const select = id => runMutation(() => selection.set('active', id))
   const selectSession = (sessionId, id) =>
-    runMutation(() => request('POST', SELECT_ROUTE, { session: sessionId, id }), [roster])
+    runMutation(async () => {
+      reportModelFailure(await request('POST', SELECT_ROUTE, { session: sessionId, id }))
+    }, [roster])
   const resetSession = sessionId =>
-    runMutation(() => request('POST', SELECT_ROUTE, { session: sessionId }), [roster])
+    runMutation(async () => {
+      reportModelFailure(await request('POST', SELECT_ROUTE, { session: sessionId }))
+    }, [roster])
   const create = id => runMutation(() => request('POST', PRESETS_ROUTE, { id }))
   const remove = id => runMutation(() => request('DELETE', PRESETS_ROUTE, { id }))
   const reveal = () => runAction(() => request('POST', REVEAL_ROUTE))

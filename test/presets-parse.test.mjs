@@ -30,6 +30,27 @@ test('合法文件解析出名字、简介、hint 与拼装后的文本', () => 
   assert.ok(preset.text.includes('\n===\n<example>\n<user>\nTranslate: hello world\n</user>'))
 })
 
+test('[Model] 表解析出 provider、model 与可选 effort', () => {
+  const preset = parsePreset('translate', `${VALID}\n[Model]\nprovider = "paratera"\nmodel = "AZ-GPT-5.6-Luna"\nreasoningEffort = "high"\n`)
+  assert.equal(preset.broken, undefined)
+  assert.deepEqual(preset.model, { provider: 'paratera', model: 'AZ-GPT-5.6-Luna', reasoningEffort: 'high' })
+  const plain = parsePreset('plain', `${VALID}\n[Model]\nprovider = "p"\nmodel = "m"\n`)
+  assert.deepEqual(plain.model, { provider: 'p', model: 'm' })
+  assert.equal(parsePreset('none', VALID).model, undefined, '没写 Model 表时行上没有 model')
+})
+
+test('[Model] 只写一半、不是表或字段类型不对，都是坏预设', () => {
+  for (const [source, reason] of [
+    [`${VALID}\n[Model]\nprovider = "p"\n`, /Model/],
+    [`${VALID}\n[Model]\nmodel = "m"\n`, /Model/],
+    [`${VALID}\n[Model]\n`, /Model/],
+    ['preset = "x"\nModel = "p/m"\n[Prompt]\nSystem = "S"\n', /Model/],
+    [`${VALID}\n[Model]\nprovider = "p"\nmodel = "m"\nreasoningEffort = 3\n`, /reasoningEffort/],
+  ]) {
+    assert.match(parsePreset('x', source).broken, reason, source)
+  }
+})
+
 test('缺少 preset 字段即坏预设，且给出原因', () => {
   const preset = parsePreset('nameless', '[Prompt]\nSystem = "S"\n')
   assert.equal(preset.id, 'nameless')

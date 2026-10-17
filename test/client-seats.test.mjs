@@ -153,6 +153,27 @@ test('selectSession 只 POST select 路由与会话键，重置不带 id，都�
   }
 })
 
+test('切换成功但模型没切过去时，把原因显示出来，预设切换仍算完成', async () => {
+  const h = harness({
+    respond: call => call.method === 'POST'
+      ? {
+        ok: true,
+        status: 200,
+        json: async () => ({ active: 'translate', overridden: true, modelError: 'provider "p" has no model "gone"' }),
+      }
+      : { ok: true, status: 200, json: async () => ROSTER_BODY },
+  })
+  try {
+    const seat = mount(h)
+    await seat.refresh()
+    await seat.selectSession('session-a', 'translate')
+    assert.match(seat.roster.getSnapshot().actionError, /预设已切换.*no model "gone"/u)
+    assert.equal(seat.roster.getSnapshot().roster.active, 'translate', '预设本身照常切过去了')
+  } finally {
+    h.restore()
+  }
+})
+
 test('会话视图的读取带 ?session=，并记住最近一次会话', async () => {
   const h = harness()
   try {
@@ -334,7 +355,7 @@ test('注册中文文案字典，且覆盖界面用到的键', () => {
     mount(h)
     assert.equal(h.dictionaries[0].ns, 'localSoulPreset')
     const zh = h.dictionaries[0].dict.zh
-    for (const key of ['nav', 'chipEmpty', 'chipStale', 'switchTitle', 'currentLabel', 'defaultMark', 'followDefault', 'stale', 'newPreset', 'remove', 'confirmRemove', 'openFolder', 'rootLabel', 'reload', 'empty']) {
+    for (const key of ['nav', 'chipEmpty', 'chipStale', 'switchTitle', 'currentLabel', 'defaultMark', 'followDefault', 'stale', 'modelPrefix', 'modelFailed', 'newPreset', 'remove', 'confirmRemove', 'openFolder', 'rootLabel', 'reload', 'empty']) {
       assert.equal(typeof zh[key], 'string', key)
     }
   } finally {
